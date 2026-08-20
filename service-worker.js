@@ -1,9 +1,9 @@
-const CACHE_NAME = 'weeky-H5';
+const CACHE_NAME = 'weeky-H6';
 const ASSETS = [
   './',
   './index.html',
-  './styles.css?v=H5',
-  './app.js?v=H5',
+  './styles.css?v=H6',
+  './app.js?v=H6',
   './manifest.webmanifest',
   './vendor/pdf-lib.min.js',
   './vendor/fontkit.umd.min.js',

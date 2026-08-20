@@ -520,7 +520,7 @@
 /* ── Constants ──────────────────────────────────────────── */
 /* Single source of truth for the version. Keep in sync with the ?v= query in
    index.html and CACHE_NAME in service-worker.js. Shown in 設定 → このアプリ. */
-const APP_VERSION = 'H5';
+const APP_VERSION = 'H6';
 const DAYS = ['月', '火', '水', '木', '金']; /* Mon–Fri only */
 const DEFAULT_PERIODS = 6;
 const ACTIVATION_CODES = ['SHUAN-2026'];
@@ -3888,89 +3888,24 @@ function updatePanelTodo() {
 
 const AI_MAX_TOOL_LOOPS = 6;
 
-/* H5: AI向け学級一覧。旧settings.classesではなく、学校・明示学級・名簿・授業記録を統合する。
-   バックアップ由来でstate.classesが空でも、studentsとlessonsから各校の全学級を復元できる。
-   AIがset_lessonへ渡す値はlessonClassName（複数校時は「学校名＋学級名」）に統一する。 */
+/* H5: AI向け学級一覧。旧settings.classesではなく、学校・明示学級・名簿・授業記録を統合する。 */
 function aiClassCatalogue() {
   const bySchool = new Map();
-  (state.schools || []).forEach(sc => bySchool.set(sc.id, {
-    schoolId: sc.id,
-    schoolName: sc.name || '',
-    schoolCode: sc.code || '',
-    isActive: sc.id === state.activeSchoolId,
-    classes: new Map(),
-  }));
-
-  const addClass = (schoolId, rawName, source, meta = {}) => {
-    const group = bySchool.get(schoolId);
-    if (!group || !rawName) return;
-    let localName = normClass(rawName);
-    const schoolPrefix = normClass(group.schoolName);
-    if (schoolPrefix && localName.startsWith(schoolPrefix)) localName = localName.slice(schoolPrefix.length).trim();
-    const parsed = parseClassText(localName);
-    if (!parsed) return; // 「その他」など学級ではない値を除外
-    const className = makeClassName(parsed.grade, parsed.classNo);
-    const key = normClass(className);
-    if (!group.classes.has(key)) group.classes.set(key, {
-      className,
-      lessonClassName: effectiveClassName(className, schoolId),
-      grade: String(meta.grade || parsed.grade),
-      classNo: String(meta.classNo || parsed.classNo),
-      years: new Set(),
-      studentIds: new Set(),
-      sources: new Set(),
-    });
-    const item = group.classes.get(key);
-    if (meta.year) item.years.add(String(meta.year));
-    if (meta.studentId) item.studentIds.add(String(meta.studentId));
-    item.sources.add(source);
+  (state.schools || []).forEach(sc => bySchool.set(sc.id, { schoolId:sc.id, schoolName:sc.name||'', schoolCode:sc.code||'', isActive:sc.id===state.activeSchoolId, classes:new Map() }));
+  const addClass = (schoolId, rawName, source, meta={}) => {
+    const group=bySchool.get(schoolId); if(!group||!rawName) return;
+    let localName=normClass(rawName), prefix=normClass(group.schoolName);
+    if(prefix && localName.startsWith(prefix)) localName=localName.slice(prefix.length).trim();
+    const parsed=parseClassText(localName); if(!parsed) return;
+    const className=makeClassName(parsed.grade,parsed.classNo), key=normClass(className);
+    if(!group.classes.has(key)) group.classes.set(key,{className,lessonClassName:effectiveClassName(className,schoolId),grade:String(meta.grade||parsed.grade),classNo:String(meta.classNo||parsed.classNo),years:new Set(),studentIds:new Set(),sources:new Set()});
+    const item=group.classes.get(key); if(meta.year)item.years.add(String(meta.year)); if(meta.studentId)item.studentIds.add(String(meta.studentId)); item.sources.add(source);
   };
-
-  (state.classes || []).forEach(c => addClass(c.schoolId, c.name, 'classes', c));
-  (state.students || []).forEach(s => addClass(s.schoolId, s.className || deriveClassName(s.grade, s.classNo), 'students', {
-    grade: s.grade, classNo: s.classNo, year: s.year, studentId: s.id || s.qrId,
-  }));
-
-  // 旧バックアップには明示学級が無く、授業だけに存在する学級もあるため補完する。
-  Object.values(state.lessons || {}).forEach(l => {
-    const raw = normClass(l && l.className);
-    if (!raw) return;
-    for (const sc of (state.schools || [])) {
-      const prefix = normClass(sc.name);
-      if (prefix && raw.startsWith(prefix)) {
-        addClass(sc.id, raw, 'lessons');
-        return;
-      }
-    }
-    // 学校名なしの旧記録は、単一校運用時だけ安全に所属校を決められる。
-    if ((state.schools || []).length === 1) addClass(state.schools[0].id, raw, 'lessons');
-  });
-
-  const schools = [...bySchool.values()].map(group => ({
-    schoolId: group.schoolId,
-    schoolName: group.schoolName,
-    schoolCode: group.schoolCode,
-    isActive: group.isActive,
-    classes: [...group.classes.values()]
-      .map(c => ({
-        className: c.className,
-        lessonClassName: c.lessonClassName,
-        grade: c.grade,
-        classNo: c.classNo,
-        years: [...c.years].sort(),
-        studentCount: c.studentIds.size,
-        sources: [...c.sources].sort(),
-      }))
-      .sort((a,b) => a.className.localeCompare(b.className, 'ja', { numeric:true })),
-  }));
-  return {
-    ok: true,
-    activeSchoolId: state.activeSchoolId || '',
-    activeSchoolName: schoolById(state.activeSchoolId)?.name || '',
-    schoolCount: schools.length,
-    classCount: schools.reduce((n, s) => n + s.classes.length, 0),
-    schools,
-  };
+  (state.classes||[]).forEach(c=>addClass(c.schoolId,c.name,'classes',c));
+  (state.students||[]).forEach(s=>addClass(s.schoolId,s.className||deriveClassName(s.grade,s.classNo),'students',{grade:s.grade,classNo:s.classNo,year:s.year,studentId:s.id||s.qrId}));
+  Object.values(state.lessons||{}).forEach(l=>{ const raw=normClass(l&&l.className); if(!raw)return; for(const sc of (state.schools||[])){const prefix=normClass(sc.name);if(prefix&&raw.startsWith(prefix)){addClass(sc.id,raw,'lessons');return;}} if((state.schools||[]).length===1)addClass(state.schools[0].id,raw,'lessons'); });
+  const schools=[...bySchool.values()].map(g=>({schoolId:g.schoolId,schoolName:g.schoolName,schoolCode:g.schoolCode,isActive:g.isActive,classes:[...g.classes.values()].map(c=>({className:c.className,lessonClassName:c.lessonClassName,grade:c.grade,classNo:c.classNo,years:[...c.years].sort(),studentCount:c.studentIds.size,sources:[...c.sources].sort()})).sort((a,b)=>a.className.localeCompare(b.className,'ja',{numeric:true}))}));
+  return {ok:true,activeSchoolId:state.activeSchoolId||'',activeSchoolName:schoolById(state.activeSchoolId)?.name||'',schoolCount:schools.length,classCount:schools.reduce((n,s)=>n+s.classes.length,0),schools};
 }
 
 function aiToolDeclarations() {
@@ -4656,6 +4591,43 @@ function _aiSetChatBusyUi(busy) {
 
 const AI_ROLE_CLASS = { user: 'ai-chat-msg--user', ai: 'ai-chat-msg--ai', system: 'ai-chat-msg--system', error: 'ai-chat-msg--error' };
 
+/* H6: GeminiのMarkdownを安全なHTMLへ変換する軽量レンダラー。外部CDN不要・オフライン対応。 */
+function aiMarkdownHtml(source) {
+  const escapeHtml = s => String(s).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+  const inline = raw => {
+    let s = escapeHtml(raw);
+    const code = [];
+    s = s.replace(/`([^`\n]+)`/g, (_,v) => `\u0000C${code.push(v)-1}\u0000`);
+    s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+    s = s.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
+    s = s.replace(/__([^_\n]+)__/g, '<strong>$1</strong>');
+    s = s.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>');
+    s = s.replace(/(^|[^_])_([^_\n]+)_/g, '$1<em>$2</em>');
+    s = s.replace(/\u0000C(\d+)\u0000/g, (_,i) => `<code>${code[Number(i)]}</code>`);
+    return s;
+  };
+  const text = String(source || '').replace(/<br\s*\/?>/gi, '\n').replace(/\r\n?/g, '\n');
+  const lines = text.split('\n'), out=[]; let para=[], list=null, fence=false, fenceLines=[];
+  const flushPara=()=>{ if(para.length){ out.push(`<p>${para.map(inline).join('<br>')}</p>`); para=[]; } };
+  const flushList=()=>{ if(list){ out.push(`<${list.type}>${list.items.map(x=>`<li>${inline(x)}</li>`).join('')}</${list.type}>`); list=null; } };
+  for (const line of lines) {
+    if (/^```/.test(line)) { flushPara(); flushList(); if(fence){out.push(`<pre><code>${escapeHtml(fenceLines.join('\n'))}</code></pre>`);fenceLines=[];} fence=!fence; continue; }
+    if (fence) { fenceLines.push(line); continue; }
+    let m;
+    if (!line.trim()) { flushPara(); flushList(); continue; }
+    if (/^\s*---+\s*$/.test(line)) { flushPara(); flushList(); out.push('<hr>'); continue; }
+    if ((m=line.match(/^(#{1,4})\s+(.+)$/))) { flushPara(); flushList(); const n=m[1].length; out.push(`<h${n}>${inline(m[2])}</h${n}>`); continue; }
+    if ((m=line.match(/^\s*[-*+]\s+(.+)$/))) { flushPara(); if(!list||list.type!=='ul'){flushList();list={type:'ul',items:[]};} list.items.push(m[1]); continue; }
+    if ((m=line.match(/^\s*\d+[.)]\s+(.+)$/))) { flushPara(); if(!list||list.type!=='ol'){flushList();list={type:'ol',items:[]};} list.items.push(m[1]); continue; }
+    if ((m=line.match(/^>\s?(.*)$/))) { flushPara(); flushList(); out.push(`<blockquote>${inline(m[1])}</blockquote>`); continue; }
+    flushList(); para.push(line);
+  }
+  if(fenceLines.length) out.push(`<pre><code>${escapeHtml(fenceLines.join('\n'))}</code></pre>`);
+  flushPara(); flushList();
+  return out.join('');
+}
+
+
 function renderAiChat() {
   const box = document.getElementById('aiChatMessages');
   const empty = document.getElementById('aiChatEmpty');
@@ -4666,7 +4638,8 @@ function renderAiChat() {
   msgs.forEach(m => {
     const div = document.createElement('div');
     div.className = 'ai-chat-msg ' + (AI_ROLE_CLASS[m.role] || 'ai-chat-msg--ai');
-    div.textContent = m.text;
+    if (m.role === 'ai') div.innerHTML = aiMarkdownHtml(m.text);
+    else div.textContent = m.text;
     box.appendChild(div);
   });
   box.scrollTop = box.scrollHeight;

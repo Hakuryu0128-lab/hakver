@@ -974,8 +974,6 @@ img { max-width: 100%; display: block; }
 .grid-cell--slim .tile-icons { display: none; }
 .grid-cell--slim .empty-cell-btn { font-size: 16px; }
 
-/* H4: 右コンテキストパネルを約2倍幅に拡大。今週統計と応援カードを廃止し、
-   AIチャットが残りの高さをすべて使う構成に変更。 */
 /* ── Context Panel ───────────────────────────────────────── */
 /* v11.13.0：デザイン統一Phase1。ヘッダーと同じ理由でborder-left: 1px solid
    var(--border) + 不透明背景を --glass-card-* に統一（settings-sectionと
