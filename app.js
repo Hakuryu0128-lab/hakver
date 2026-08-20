@@ -520,7 +520,7 @@
 /* ── Constants ──────────────────────────────────────────── */
 /* Single source of truth for the version. Keep in sync with the ?v= query in
    index.html and CACHE_NAME in service-worker.js. Shown in 設定 → このアプリ. */
-const APP_VERSION = 'H4';
+const APP_VERSION = 'H5';
 const DAYS = ['月', '火', '水', '木', '金']; /* Mon–Fri only */
 const DEFAULT_PERIODS = 6;
 const ACTIVATION_CODES = ['SHUAN-2026'];
@@ -3888,6 +3888,91 @@ function updatePanelTodo() {
 
 const AI_MAX_TOOL_LOOPS = 6;
 
+/* H5: AI向け学級一覧。旧settings.classesではなく、学校・明示学級・名簿・授業記録を統合する。
+   バックアップ由来でstate.classesが空でも、studentsとlessonsから各校の全学級を復元できる。
+   AIがset_lessonへ渡す値はlessonClassName（複数校時は「学校名＋学級名」）に統一する。 */
+function aiClassCatalogue() {
+  const bySchool = new Map();
+  (state.schools || []).forEach(sc => bySchool.set(sc.id, {
+    schoolId: sc.id,
+    schoolName: sc.name || '',
+    schoolCode: sc.code || '',
+    isActive: sc.id === state.activeSchoolId,
+    classes: new Map(),
+  }));
+
+  const addClass = (schoolId, rawName, source, meta = {}) => {
+    const group = bySchool.get(schoolId);
+    if (!group || !rawName) return;
+    let localName = normClass(rawName);
+    const schoolPrefix = normClass(group.schoolName);
+    if (schoolPrefix && localName.startsWith(schoolPrefix)) localName = localName.slice(schoolPrefix.length).trim();
+    const parsed = parseClassText(localName);
+    if (!parsed) return; // 「その他」など学級ではない値を除外
+    const className = makeClassName(parsed.grade, parsed.classNo);
+    const key = normClass(className);
+    if (!group.classes.has(key)) group.classes.set(key, {
+      className,
+      lessonClassName: effectiveClassName(className, schoolId),
+      grade: String(meta.grade || parsed.grade),
+      classNo: String(meta.classNo || parsed.classNo),
+      years: new Set(),
+      studentIds: new Set(),
+      sources: new Set(),
+    });
+    const item = group.classes.get(key);
+    if (meta.year) item.years.add(String(meta.year));
+    if (meta.studentId) item.studentIds.add(String(meta.studentId));
+    item.sources.add(source);
+  };
+
+  (state.classes || []).forEach(c => addClass(c.schoolId, c.name, 'classes', c));
+  (state.students || []).forEach(s => addClass(s.schoolId, s.className || deriveClassName(s.grade, s.classNo), 'students', {
+    grade: s.grade, classNo: s.classNo, year: s.year, studentId: s.id || s.qrId,
+  }));
+
+  // 旧バックアップには明示学級が無く、授業だけに存在する学級もあるため補完する。
+  Object.values(state.lessons || {}).forEach(l => {
+    const raw = normClass(l && l.className);
+    if (!raw) return;
+    for (const sc of (state.schools || [])) {
+      const prefix = normClass(sc.name);
+      if (prefix && raw.startsWith(prefix)) {
+        addClass(sc.id, raw, 'lessons');
+        return;
+      }
+    }
+    // 学校名なしの旧記録は、単一校運用時だけ安全に所属校を決められる。
+    if ((state.schools || []).length === 1) addClass(state.schools[0].id, raw, 'lessons');
+  });
+
+  const schools = [...bySchool.values()].map(group => ({
+    schoolId: group.schoolId,
+    schoolName: group.schoolName,
+    schoolCode: group.schoolCode,
+    isActive: group.isActive,
+    classes: [...group.classes.values()]
+      .map(c => ({
+        className: c.className,
+        lessonClassName: c.lessonClassName,
+        grade: c.grade,
+        classNo: c.classNo,
+        years: [...c.years].sort(),
+        studentCount: c.studentIds.size,
+        sources: [...c.sources].sort(),
+      }))
+      .sort((a,b) => a.className.localeCompare(b.className, 'ja', { numeric:true })),
+  }));
+  return {
+    ok: true,
+    activeSchoolId: state.activeSchoolId || '',
+    activeSchoolName: schoolById(state.activeSchoolId)?.name || '',
+    schoolCount: schools.length,
+    classCount: schools.reduce((n, s) => n + s.classes.length, 0),
+    schools,
+  };
+}
+
 function aiToolDeclarations() {
   return [{
     functionDeclarations: [
@@ -4001,7 +4086,7 @@ function aiToolDeclarations() {
       },
       {
         name: 'list_classes',
-        description: '登録されているクラス名の一覧を取得する。set_lessonのclassNameに使う。',
+        description: '全学校の登録学級を学校別に取得する。明示学級・名簿・授業記録を統合し、学校ID・学校名・学級名・生徒数を返す。set_lessonのclassNameには必ずlessonClassNameを使う。',
         parameters: { type: 'object', properties: {} },
       },
       {
@@ -4233,7 +4318,7 @@ function aiExecuteTool(name, args) {
         return { ok: true, subjects: state.settings.subjects.map(s => ({ id: s.id, name: s.name })) };
       }
       case 'list_classes': {
-        return { ok: true, classes: [...state.settings.classes] };
+        return aiClassCatalogue();
       }
       case 'get_lesson': {
         if (!args.date || !args.period) return { error: 'date and period are required' };
@@ -4262,10 +4347,17 @@ function aiExecuteTool(name, args) {
         if (!args.date || !args.period) return { error: 'date and period are required' };
         const key = `${args.date}_${args.period}`;
         const prev = state.lessons[key] || {};
+        let nextClassName = args.className !== undefined ? String(args.className || '') : (prev.className || '');
+        if (args.className !== undefined && nextClassName) {
+          const validClasses = aiClassCatalogue().schools.flatMap(s => s.classes.map(c => c.lessonClassName));
+          const matched = validClasses.find(c => normClass(c) === normClass(nextClassName));
+          if (!matched) return { error: 'unknown className', className: nextClassName, hint: 'list_classesのlessonClassNameを使用してください' };
+          nextClassName = matched;
+        }
         state.lessons[key] = {
           ...prev,
           subjectId: args.subjectId !== undefined ? args.subjectId : (prev.subjectId || ''),
-          className:  args.className !== undefined ? args.className : (prev.className || ''),
+          className:  nextClassName,
           title:      args.title !== undefined ? args.title : (prev.title || ''),
           note:       args.note !== undefined ? args.note : (prev.note || ''),
           tags:       Array.isArray(args.tags) ? args.tags.filter(Boolean) : (prev.tags || []),
@@ -4420,7 +4512,9 @@ function aiSystemInstructionText() {
     'あなたはWEEKY（教員向け授業記録・週案管理アプリ）のサイドバーに常駐するAIアシスタントです。' +
     'ユーザーは中学校の技術・情報科の先生です。日本語で、簡潔かつフランクに答えてください。\n\n' +
     'ToDo・週案（授業記録）・メモの操作が必要な時は、必ず用意されているツールを使って実行し、' +
-    '内容を推測だけで済ませないでください。週案を編集する前はlist_subjects/list_classesで有効な値を、' +
+    '内容を推測だけで済ませないでください。学級について質問されたらlist_classesを使い、schools配列を学校ごとに確認してください。' +
+    '複数校では同名学級を混同せず、週案を編集する際のclassNameにはlist_classesが返すlessonClassNameをそのまま使ってください。' +
+    '週案を編集する前はlist_subjects/list_classesで有効な値を、' +
     'idが必要な操作の前はlist_todos/list_notes/list_memoryで対象のidを確認すること。\n\n' +
     `今日の日付は ${formatDate(new Date())} です。\n\n` +
     '【長期記憶（ユーザーについて覚えていること）】\n' + factsText + '\n\n' +
