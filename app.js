@@ -520,7 +520,7 @@
 /* ── Constants ──────────────────────────────────────────── */
 /* Single source of truth for the version. Keep in sync with the ?v= query in
    index.html and CACHE_NAME in service-worker.js. Shown in 設定 → このアプリ. */
-const APP_VERSION = 'H1';
+const APP_VERSION = 'H2';
 const DAYS = ['月', '火', '水', '木', '金']; /* Mon–Fri only */
 const DEFAULT_PERIODS = 6;
 const ACTIVATION_CODES = ['SHUAN-2026'];
@@ -4091,12 +4091,16 @@ async function sendAiChatMessage(userText) {
   try {
     for (let i = 0; i < AI_MAX_TOOL_LOOPS; i++) {
       const parts = await aiCallGemini(contents);
-      const functionCalls = parts.filter(p => p.functionCall).map(p => p.functionCall);
+      // thought_signature対策: functionCallの{name,args}だけでなく、partをまるごと
+      // 保持して送り返す（thoughtSignatureはfunctionCallの隣にpart単位で付く。
+      // 抜き出して作り直すと消えてGemini 3系でエラーになる）。
+      const functionCallParts = parts.filter(p => p.functionCall);
       const textParts = parts.filter(p => typeof p.text === 'string').map(p => p.text);
 
-      if (functionCalls.length) {
-        contents = [...contents, { role: 'model', parts: functionCalls.map(fc => ({ functionCall: fc })) }];
-        const responses = functionCalls.map(fc => {
+      if (functionCallParts.length) {
+        contents = [...contents, { role: 'model', parts: functionCallParts }];
+        const responses = functionCallParts.map(p => {
+          const fc = p.functionCall;
           const label = AI_TOOL_LABELS[fc.name] || fc.name;
           aiPushMessage('system', `🔧 ${label}`);
           const result = aiExecuteTool(fc.name, fc.args);
