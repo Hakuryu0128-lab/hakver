@@ -520,7 +520,7 @@
 /* ── Constants ──────────────────────────────────────────── */
 /* Single source of truth for the version. Keep in sync with the ?v= query in
    index.html and CACHE_NAME in service-worker.js. Shown in 設定 → このアプリ. */
-const APP_VERSION = 'H2';
+const APP_VERSION = 'H3';
 const DAYS = ['月', '火', '水', '木', '金']; /* Mon–Fri only */
 const DEFAULT_PERIODS = 6;
 const ACTIVATION_CODES = ['SHUAN-2026'];
@@ -643,6 +643,7 @@ const state = {
     },
   },
   aiChat: { messages: [] }, // Hauryuver: サイドバーAIチャットの会話履歴（表示用の簡略ログ。role:'user'|'ai'|'system'|'error', text）
+  aiMemory: { facts: [], mistakes: [] }, // Hauryuver: AIの長期記憶（facts）と失敗パターン（mistakes）。毎回system promptへ自動注入
   activeView: 'weekly',
   eventsYear: new Date().getFullYear(),
   eventsMonth: new Date().getMonth() + 1,
@@ -681,6 +682,7 @@ function save() {
     evalRules: state.evalRules,
     settings: state.settings,
     aiChat: state.aiChat,
+    aiMemory: state.aiMemory,
   };
   kvSet('weeky_v10', payload).then(() => {
     const el = document.getElementById('autosaveStatus');
@@ -725,6 +727,7 @@ async function load() {
     state.evalColumns  = data.evalColumns  || {};
     state.evalRules    = data.evalRules    || {};
     if (data.aiChat && Array.isArray(data.aiChat.messages)) state.aiChat = data.aiChat;
+    if (data.aiMemory) state.aiMemory = { facts: data.aiMemory.facts || [], mistakes: data.aiMemory.mistakes || [] };
     if (data.settings) Object.assign(state.settings, data.settings);
     // 旧データはsettings.aiを持たないため、Object.assignで消えていないか保険で確認
     if (!state.settings.ai) state.settings.ai = { apiKey: '', model: 'gemini-2.5-flash', systemPrompt: '' };
@@ -3938,6 +3941,168 @@ function aiToolDeclarations() {
           required: ['id'],
         },
       },
+
+      /* ── 長期記憶・失敗パターン（local-agentのmemory.md/mistakes.md相当） ── */
+      {
+        name: 'remember_fact',
+        description: 'ユーザーについての長期的に覚えておくべき事実・好み・方針をAIの長期記憶に保存する。' +
+          'チャット履歴とは別に保存され、今後の全てのチャットで自動的にシステムプロンプトへ読み込まれる。' +
+          '「毎回~して」「私は~です」のような、今後も踏まえてほしい情報を言われたら積極的に使うこと。',
+        parameters: {
+          type: 'object',
+          properties: { text: { type: 'string', description: '覚えておく内容（簡潔な一文が望ましい）' } },
+          required: ['text'],
+        },
+      },
+      {
+        name: 'list_memory',
+        description: '長期記憶（facts）と記録済みの失敗パターン（mistakes）の一覧をidつきで取得する。' +
+          '長期記憶を消す/更新する前には必ずこれで対象のidを確認すること。',
+        parameters: { type: 'object', properties: {} },
+      },
+      {
+        name: 'forget_fact',
+        description: '長期記憶から指定した事実を削除する。',
+        parameters: {
+          type: 'object',
+          properties: { id: { type: 'string', description: 'list_memoryで得た事実のid' } },
+          required: ['id'],
+        },
+      },
+      {
+        name: 'record_mistake',
+        description: 'ユーザーから明示的な訂正を受けた時、同じ間違いを繰り返さないよう失敗パターンとして記録する。' +
+          '再発しうるパターンの時だけ使うこと（一回限りの単純ミスは不要）。今後全てのチャットで自動的に読み込まれる。',
+        parameters: {
+          type: 'object',
+          properties: {
+            situation: { type: 'string', description: 'このルールを適用すべき状況・トリガー' },
+            wrong:     { type: 'string', description: '実際に行った誤った対応' },
+            correct:   { type: 'string', description: '次回以降の正しい対応' },
+          },
+          required: ['situation', 'wrong', 'correct'],
+        },
+      },
+      {
+        name: 'forget_mistake',
+        description: '記録済みの失敗パターンを1件削除する。',
+        parameters: {
+          type: 'object',
+          properties: { id: { type: 'string', description: 'list_memoryで得た失敗パターンのid' } },
+          required: ['id'],
+        },
+      },
+
+      /* ── 週案（授業記録）── */
+      {
+        name: 'list_subjects',
+        description: '登録されている教科の一覧（id・名前）を取得する。set_lessonのsubjectIdに使う。',
+        parameters: { type: 'object', properties: {} },
+      },
+      {
+        name: 'list_classes',
+        description: '登録されているクラス名の一覧を取得する。set_lessonのclassNameに使う。',
+        parameters: { type: 'object', properties: {} },
+      },
+      {
+        name: 'get_lesson',
+        description: '指定した日付・時限の授業記録（週案）を1件取得する。',
+        parameters: {
+          type: 'object',
+          properties: {
+            date:   { type: 'string', description: '日付 YYYY-MM-DD' },
+            period: { type: 'integer', description: '時限（1始まり）' },
+          },
+          required: ['date', 'period'],
+        },
+      },
+      {
+        name: 'list_week_lessons',
+        description: '指定した日付が含まれる週（月〜金）の授業記録を全時限分まとめて取得する。' +
+          '「今週の授業を教えて」「来週の予定」等はまずこれを使うこと。',
+        parameters: {
+          type: 'object',
+          properties: { date: { type: 'string', description: 'その週に含まれる任意の日付 YYYY-MM-DD' } },
+          required: ['date'],
+        },
+      },
+      {
+        name: 'set_lesson',
+        description: '指定した日付・時限の授業記録（週案）を新規作成または更新する。渡したフィールドだけ上書きされる。' +
+          '事前にlist_subjects/list_classesで有効な値を確認しておくこと。',
+        parameters: {
+          type: 'object',
+          properties: {
+            date:      { type: 'string', description: '日付 YYYY-MM-DD' },
+            period:    { type: 'integer', description: '時限（1始まり）' },
+            subjectId: { type: 'string', description: '教科id（list_subjects参照、任意）' },
+            className: { type: 'string', description: 'クラス名（list_classes参照、任意）' },
+            title:     { type: 'string', description: '授業タイトル・単元名（任意）' },
+            note:      { type: 'string', description: '授業メモ・内容（任意）' },
+            tags:      { type: 'array', items: { type: 'string' }, description: 'タグ（任意）' },
+          },
+          required: ['date', 'period'],
+        },
+      },
+      {
+        name: 'delete_lesson',
+        description: '指定した日付・時限の授業記録（週案）を削除する。',
+        parameters: {
+          type: 'object',
+          properties: {
+            date:   { type: 'string', description: '日付 YYYY-MM-DD' },
+            period: { type: 'integer', description: '時限（1始まり）' },
+          },
+          required: ['date', 'period'],
+        },
+      },
+
+      /* ── メモ（自作ノートアプリ） ── */
+      {
+        name: 'add_note',
+        description: 'メモアプリに新しいメモを作成する。',
+        parameters: {
+          type: 'object',
+          properties: {
+            title:   { type: 'string', description: 'タイトル（任意・空なら本文1行目が使われる）' },
+            content: { type: 'string', description: '本文' },
+            tags:    { type: 'array', items: { type: 'string' }, description: 'タグ（任意）' },
+          },
+          required: ['content'],
+        },
+      },
+      {
+        name: 'list_notes',
+        description: 'メモの一覧を取得する。queryを指定するとタイトル・本文・タグで絞り込む。',
+        parameters: {
+          type: 'object',
+          properties: { query: { type: 'string', description: '検索語（任意）' } },
+        },
+      },
+      {
+        name: 'update_note',
+        description: '指定したメモのタイトル・本文・タグを変更する。渡したフィールドだけ更新される。' +
+          '事前にlist_notesでidを確認すること。',
+        parameters: {
+          type: 'object',
+          properties: {
+            id:      { type: 'string', description: 'メモのid' },
+            title:   { type: 'string', description: '新しいタイトル（任意）' },
+            content: { type: 'string', description: '新しい本文（任意）' },
+            tags:    { type: 'array', items: { type: 'string' }, description: '新しいタグ一覧（任意）' },
+          },
+          required: ['id'],
+        },
+      },
+      {
+        name: 'delete_note',
+        description: '指定したメモを削除する。事前にlist_notesでidを確認すること。',
+        parameters: {
+          type: 'object',
+          properties: { id: { type: 'string', description: 'メモのid' } },
+          required: ['id'],
+        },
+      },
     ],
   }];
 }
@@ -3949,6 +4114,21 @@ const AI_TOOL_LABELS = {
   toggle_todo: 'ToDoの完了状態を変更',
   update_todo: 'ToDoを編集',
   delete_todo: 'ToDoを削除',
+  remember_fact: '長期記憶に保存',
+  list_memory: '長期記憶を確認',
+  forget_fact: '長期記憶を削除',
+  record_mistake: '失敗パターンを記録',
+  forget_mistake: '失敗パターンを削除',
+  list_subjects: '教科一覧を確認',
+  list_classes: 'クラス一覧を確認',
+  get_lesson: '授業記録を確認',
+  list_week_lessons: '週の授業記録を確認',
+  set_lesson: '授業記録を保存',
+  delete_lesson: '授業記録を削除',
+  add_note: 'メモを作成',
+  list_notes: 'メモを確認',
+  update_note: 'メモを編集',
+  delete_note: 'メモを削除',
 };
 
 function aiExecuteTool(name, args) {
@@ -4002,6 +4182,156 @@ function aiExecuteTool(name, args) {
         _aiRefreshTodoUi();
         return { ok: true, deleted: { id: removed.id, text: removed.text } };
       }
+
+      /* ── 長期記憶・失敗パターン ── */
+      case 'remember_fact': {
+        if (!args.text || !String(args.text).trim()) return { error: 'text is required' };
+        const fact = { id: uid(), text: String(args.text).trim(), createdAt: Date.now() };
+        state.aiMemory.facts.push(fact);
+        save();
+        _aiRefreshMemoryUi();
+        return { ok: true, fact };
+      }
+      case 'list_memory': {
+        return {
+          ok: true,
+          facts: state.aiMemory.facts.map(f => ({ id: f.id, text: f.text })),
+          mistakes: state.aiMemory.mistakes.map(m => ({ id: m.id, situation: m.situation, wrong: m.wrong, correct: m.correct })),
+        };
+      }
+      case 'forget_fact': {
+        const idx = state.aiMemory.facts.findIndex(f => f.id === args.id);
+        if (idx < 0) return { error: 'fact not found', id: args.id };
+        const [removed] = state.aiMemory.facts.splice(idx, 1);
+        save();
+        _aiRefreshMemoryUi();
+        return { ok: true, deleted: removed };
+      }
+      case 'record_mistake': {
+        if (!args.situation || !args.wrong || !args.correct) return { error: 'situation, wrong, correct are all required' };
+        const mistake = {
+          id: uid(), situation: String(args.situation).trim(),
+          wrong: String(args.wrong).trim(), correct: String(args.correct).trim(),
+          createdAt: Date.now(),
+        };
+        state.aiMemory.mistakes.push(mistake);
+        save();
+        _aiRefreshMemoryUi();
+        return { ok: true, mistake };
+      }
+      case 'forget_mistake': {
+        const idx = state.aiMemory.mistakes.findIndex(m => m.id === args.id);
+        if (idx < 0) return { error: 'mistake not found', id: args.id };
+        const [removed] = state.aiMemory.mistakes.splice(idx, 1);
+        save();
+        _aiRefreshMemoryUi();
+        return { ok: true, deleted: removed };
+      }
+
+      /* ── 週案 ── */
+      case 'list_subjects': {
+        return { ok: true, subjects: state.settings.subjects.map(s => ({ id: s.id, name: s.name })) };
+      }
+      case 'list_classes': {
+        return { ok: true, classes: [...state.settings.classes] };
+      }
+      case 'get_lesson': {
+        if (!args.date || !args.period) return { error: 'date and period are required' };
+        const key = `${args.date}_${args.period}`;
+        const lesson = state.lessons[key];
+        if (!lesson) return { ok: true, lesson: null };
+        return { ok: true, lesson: _aiLessonView(args.date, args.period, lesson) };
+      }
+      case 'list_week_lessons': {
+        if (!args.date) return { error: 'date is required' };
+        const d = new Date(args.date + 'T00:00:00');
+        if (isNaN(d.getTime())) return { error: 'invalid date' };
+        const weekStart = getWeekStart(d);
+        const results = [];
+        for (let dayOff = 0; dayOff < 5; dayOff++) {
+          const day = addDays(weekStart, dayOff);
+          const dateStr = formatDate(day);
+          for (let p = 1; p <= state.settings.periodsCount; p++) {
+            const key = `${dateStr}_${p}`;
+            if (state.lessons[key]) results.push(_aiLessonView(dateStr, p, state.lessons[key]));
+          }
+        }
+        return { ok: true, weekStart: formatDate(weekStart), lessons: results };
+      }
+      case 'set_lesson': {
+        if (!args.date || !args.period) return { error: 'date and period are required' };
+        const key = `${args.date}_${args.period}`;
+        const prev = state.lessons[key] || {};
+        state.lessons[key] = {
+          ...prev,
+          subjectId: args.subjectId !== undefined ? args.subjectId : (prev.subjectId || ''),
+          className:  args.className !== undefined ? args.className : (prev.className || ''),
+          title:      args.title !== undefined ? args.title : (prev.title || ''),
+          note:       args.note !== undefined ? args.note : (prev.note || ''),
+          tags:       Array.isArray(args.tags) ? args.tags.filter(Boolean) : (prev.tags || []),
+        };
+        save();
+        _aiRefreshLessonUi();
+        return { ok: true, lesson: _aiLessonView(args.date, args.period, state.lessons[key]) };
+      }
+      case 'delete_lesson': {
+        if (!args.date || !args.period) return { error: 'date and period are required' };
+        const key = `${args.date}_${args.period}`;
+        if (!state.lessons[key]) return { error: 'lesson not found' };
+        delete state.lessons[key];
+        save();
+        _aiRefreshLessonUi();
+        return { ok: true, deleted: { date: args.date, period: args.period } };
+      }
+
+      /* ── メモ ── */
+      case 'add_note': {
+        if (!args.content || !String(args.content).trim()) return { error: 'content is required' };
+        const note = {
+          id: uid(), title: args.title || '', content: String(args.content),
+          tags: Array.isArray(args.tags) ? args.tags.filter(Boolean) : [],
+          date: formatDate(new Date()), updated: Date.now(),
+        };
+        state.notes.unshift(note);
+        save();
+        _aiRefreshNotesUi();
+        return { ok: true, note: { id: note.id, title: noteTitle(note) } };
+      }
+      case 'list_notes': {
+        const q = (args.query || '').toLowerCase().trim();
+        let notes = [...state.notes];
+        if (q) {
+          notes = notes.filter(n =>
+            (n.content || '').toLowerCase().includes(q) ||
+            noteTitle(n).toLowerCase().includes(q) ||
+            (n.tags || []).some(t => t.toLowerCase().includes(q)));
+        }
+        return {
+          ok: true,
+          notes: notes.map(n => ({ id: n.id, title: noteTitle(n), content: n.content || '', tags: n.tags || [], date: n.date || '' })),
+        };
+      }
+      case 'update_note': {
+        const n = state.notes.find(x => x.id === args.id);
+        if (!n) return { error: 'note not found', id: args.id };
+        if (typeof args.title === 'string') n.title = args.title;
+        if (typeof args.content === 'string') n.content = args.content;
+        if (Array.isArray(args.tags)) n.tags = args.tags.filter(Boolean);
+        n.updated = Date.now();
+        save();
+        _aiRefreshNotesUi();
+        return { ok: true, note: { id: n.id, title: noteTitle(n) } };
+      }
+      case 'delete_note': {
+        const idx = state.notes.findIndex(x => x.id === args.id);
+        if (idx < 0) return { error: 'note not found', id: args.id };
+        const [removed] = state.notes.splice(idx, 1);
+        if (state.activeNoteId === removed.id) state.activeNoteId = null;
+        save();
+        _aiRefreshNotesUi();
+        return { ok: true, deleted: { id: removed.id, title: noteTitle(removed) } };
+      }
+
       default:
         return { error: `unknown tool: ${name}` };
     }
@@ -4010,19 +4340,94 @@ function aiExecuteTool(name, args) {
   }
 }
 
+function _aiLessonView(date, period, lesson) {
+  const subj = lesson.subjectId ? getSubjectById(lesson.subjectId) : null;
+  return {
+    date, period,
+    subjectId: lesson.subjectId || '', subjectName: subj?.name || '',
+    className: lesson.className || '', title: lesson.title || '',
+    note: lesson.note || '', tags: lesson.tags || [],
+  };
+}
+
 function _aiRefreshTodoUi() {
   updatePanelTodo();
   if (state.activeView === 'todo') { renderTodoBoard(); renderTodoTagOptions(); }
 }
 
+function _aiRefreshLessonUi() {
+  renderWeekGrid();
+  updateStats();
+}
+
+function _aiRefreshNotesUi() {
+  if (state.activeView === 'notes') renderNotesList();
+}
+
+function _aiRefreshMemoryUi() {
+  renderAiMemorySettings();
+}
+
+function renderAiMemorySettings() {
+  const factsBox = document.getElementById('aiMemoryFacts');
+  const mistakesBox = document.getElementById('aiMemoryMistakes');
+  if (!factsBox || !mistakesBox) return; // 設定画面が開かれていない時は何もしない
+
+  const facts = state.aiMemory?.facts || [];
+  const mistakes = state.aiMemory?.mistakes || [];
+
+  factsBox.innerHTML = facts.length ? '' : '<p class="settings-hint">まだありません。</p>';
+  facts.forEach(f => {
+    const row = document.createElement('div');
+    row.className = 'ai-memory-row';
+    row.innerHTML = `<span class="ai-memory-row-text">${escHtml(f.text)}</span>
+      <button type="button" class="ai-memory-row-del" aria-label="削除">×</button>`;
+    row.querySelector('.ai-memory-row-del').addEventListener('click', () => {
+      state.aiMemory.facts = state.aiMemory.facts.filter(x => x.id !== f.id);
+      save();
+      renderAiMemorySettings();
+    });
+    factsBox.appendChild(row);
+  });
+
+  mistakesBox.innerHTML = mistakes.length ? '' : '<p class="settings-hint">まだありません。</p>';
+  mistakes.forEach(m => {
+    const row = document.createElement('div');
+    row.className = 'ai-memory-row';
+    row.innerHTML = `<span class="ai-memory-row-text"><b>${escHtml(m.situation)}</b><br>NG: ${escHtml(m.wrong)}<br>OK: ${escHtml(m.correct)}</span>
+      <button type="button" class="ai-memory-row-del" aria-label="削除">×</button>`;
+    row.querySelector('.ai-memory-row-del').addEventListener('click', () => {
+      state.aiMemory.mistakes = state.aiMemory.mistakes.filter(x => x.id !== m.id);
+      save();
+      renderAiMemorySettings();
+    });
+    mistakesBox.appendChild(row);
+  });
+}
+
 function aiSystemInstructionText() {
   const custom = (state.settings.ai?.systemPrompt || '').trim();
+  const facts = state.aiMemory?.facts || [];
+  const mistakes = state.aiMemory?.mistakes || [];
+  const factsText = facts.length
+    ? facts.map(f => `- ${f.text}`).join('\n')
+    : '（まだなし）';
+  const mistakesText = mistakes.length
+    ? mistakes.map(m => `- 状況「${m.situation}」→ NG:「${m.wrong}」 / 正しくは:「${m.correct}」`).join('\n')
+    : '（まだなし）';
+
   const base =
     'あなたはWEEKY（教員向け授業記録・週案管理アプリ）のサイドバーに常駐するAIアシスタントです。' +
-    'ユーザーは中学校の技術・情報科の先生です。日本語で、簡潔かつフランクに答えてください。' +
-    'ToDoの追加・確認・編集・削除が必要な時は、必ず用意されているツール（add_todo / list_todos / ' +
-    'toggle_todo / update_todo / delete_todo）を使って実行し、内容を推測だけで済ませないでください。' +
-    `今日の日付は ${formatDate(new Date())} です。`;
+    'ユーザーは中学校の技術・情報科の先生です。日本語で、簡潔かつフランクに答えてください。\n\n' +
+    'ToDo・週案（授業記録）・メモの操作が必要な時は、必ず用意されているツールを使って実行し、' +
+    '内容を推測だけで済ませないでください。週案を編集する前はlist_subjects/list_classesで有効な値を、' +
+    'idが必要な操作の前はlist_todos/list_notes/list_memoryで対象のidを確認すること。\n\n' +
+    `今日の日付は ${formatDate(new Date())} です。\n\n` +
+    '【長期記憶（ユーザーについて覚えていること）】\n' + factsText + '\n\n' +
+    '【過去の失敗パターン（繰り返さないこと）】\n' + mistakesText + '\n\n' +
+    'ユーザーから「今後は~して」「私は~だ」のような、今後も踏まえてほしい情報を言われたらremember_factで保存すること。' +
+    'ユーザーから明示的な訂正を受け、それが再発しうるパターンなら、record_mistakeで記録すること' +
+    '（一回限りの単純ミスまで逐一記録する必要はない）。';
   return custom ? `${base}\n\n【ユーザーからの追加指示】\n${custom}` : base;
 }
 
@@ -6457,6 +6862,7 @@ function renderSettings() {
   if (s('aiApiKey'))       s('aiApiKey').value         = state.settings.ai?.apiKey || '';
   if (s('aiModel'))        s('aiModel').value          = state.settings.ai?.model || 'gemini-2.5-flash';
   if (s('aiSystemPrompt')) s('aiSystemPrompt').value   = state.settings.ai?.systemPrompt || '';
+  renderAiMemorySettings();
 
   renderSubjectColorGrid();
   renderAppearanceSeg();

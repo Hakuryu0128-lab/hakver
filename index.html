@@ -15,7 +15,7 @@
   <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png" />
   <link rel="icon" type="image/png" sizes="512x512" href="icons/icon-512.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="stylesheet" href="styles.css?v=H2" />
+  <link rel="stylesheet" href="styles.css?v=H3" />
   <!-- Hauryuver: AIチャットパネル用スタイル。styles.css未編集で完結させるため
        ここに直書き（本体スタイルに合流させたくなったら styles.css へ移動可）。
        (Decisions: 2026-08-18-weeky-ai-sidebar-gemini-integration) -->
@@ -66,6 +66,18 @@
       background: var(--brand, #4f46e5); color: #fff; display: flex; align-items: center; justify-content: center;
     }
     .ai-chat-send-btn:disabled { opacity: .5; cursor: default; }
+    .ai-memory-list { display: flex; flex-direction: column; gap: 6px; margin: 6px 0 4px; }
+    .ai-memory-row {
+      display: flex; align-items: flex-start; justify-content: space-between; gap: 8px;
+      background: rgba(0,0,0,.035); border: 1px solid rgba(0,0,0,.08); border-radius: 8px;
+      padding: 8px 10px; font-size: 12.5px; line-height: 1.5;
+    }
+    .ai-memory-row-text { flex: 1 1 auto; word-break: break-word; }
+    .ai-memory-row-del {
+      flex: none; border: none; background: transparent; cursor: pointer; font-size: 15px;
+      line-height: 1; opacity: .5; padding: 0 2px;
+    }
+    .ai-memory-row-del:hover { opacity: 1; }
   </style>
   <title>WEEKY</title>
 </head>
@@ -909,6 +921,12 @@
                   <label for="aiSystemPrompt">システムプロンプト</label>
                   <textarea id="aiSystemPrompt" class="settings-input" rows="4" placeholder="（任意）AIへの役割・口調などの指示"></textarea>
                 </div>
+                <h3 style="margin-top:20px;">長期記憶</h3>
+                <p class="settings-hint">AIが「今後も覚えておいて」と言われた内容。チャットを消しても残り、毎回自動でAIに読み込まれます。</p>
+                <div class="ai-memory-list" id="aiMemoryFacts"></div>
+                <h3 style="margin-top:20px;">失敗パターン</h3>
+                <p class="settings-hint">AIが訂正を受けて記録した「次から気をつけること」。同じミスを繰り返さないよう毎回自動で読み込まれます。</p>
+                <div class="ai-memory-list" id="aiMemoryMistakes"></div>
               </section>
 
               <section class="settings-section hidden" data-cat="support">
@@ -1472,6 +1490,6 @@
 <script src="vendor/fontkit.umd.min.js"></script>
 <script async src="https://tally.so/widgets/embed.js"></script>
 <script async src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
-<script src="app.js?v=H2"></script>
+<script src="app.js?v=H3"></script>
 </body>
 </html>
