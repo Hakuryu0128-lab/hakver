@@ -520,7 +520,7 @@
 /* ── Constants ──────────────────────────────────────────── */
 /* Single source of truth for the version. Keep in sync with the ?v= query in
    index.html and CACHE_NAME in service-worker.js. Shown in 設定 → このアプリ. */
-const APP_VERSION = 'H11';
+const APP_VERSION = 'H12';
 const DAYS = ['月', '火', '水', '木', '金']; /* Mon–Fri only */
 const DEFAULT_PERIODS = 6;
 const ACTIVATION_CODES = ['SHUAN-2026'];
@@ -638,8 +638,9 @@ const state = {
     lockTimeoutMin: 5,       // 無操作タイムアウト（分）1|3|5|10|30
     ai: {                    // Hauryuver: サイドバーAIチャット用（Gemini API）
       apiKey: '',
-      model: 'gemini-3.5-flash',
+      model: 'gemini-3.6-flash',
       systemPrompt: '',
+      webSearchMode: 'off', // off | auto | on。初期値OFF（検索ツールをAPIへ付けない）
     },
   },
   aiChat: { messages: [] }, // Hauryuver: サイドバーAIチャットの会話履歴（表示用の簡略ログ。role:'user'|'ai'|'system'|'error', text）
@@ -730,7 +731,8 @@ async function load() {
     if (data.aiMemory) state.aiMemory = { facts: data.aiMemory.facts || [], mistakes: data.aiMemory.mistakes || [] };
     if (data.settings) Object.assign(state.settings, data.settings);
     // 旧データはsettings.aiを持たないため、Object.assignで消えていないか保険で確認
-    if (!state.settings.ai) state.settings.ai = { apiKey: '', model: 'gemini-3.5-flash', systemPrompt: '' };
+    if (!state.settings.ai) state.settings.ai = { apiKey: '', model: 'gemini-3.6-flash', systemPrompt: '', webSearchMode: 'off' };
+    if (!['off','auto','on'].includes(state.settings.ai.webSearchMode)) state.settings.ai.webSearchMode = 'off';
     if (state.settings.viewTransition === 'warp') state.settings.viewTransition = 'pop';  // 廃止した演出のフォールバック
 
     // 旧「ミッドナイト」テーマ＝暗い背景。外観モード導入に伴い、
@@ -4502,22 +4504,60 @@ function aiBuildContentsFromHistory() {
     .map(m => ({ role: m.role === 'ai' ? 'model' : 'user', parts: [{ text: m.text }] }));
 }
 
+let _aiWebSearchForRequest = false;
+
+/* AUTOは追加APIを使わず、端末内の文面判定だけで検索ツールを付けるか決める。
+   OFF時はgoogleSearch宣言自体を送らないため、検索側クォータの巻き添えを防ぐ。 */
+function aiShouldUseWebSearch(text) {
+  const s = String(text || '').toLowerCase().replace(/\s+/g, ' ');
+  if (!s) return false;
+  const explicit = /(web|ウェブ|google|グーグル|ネット).{0,8}(検索|調べ)|検索して|ネットで調べ|ウェブで調べ|公式サイト|urlを確認|出典を確認/;
+  if (explicit.test(s)) return true;
+  const internal = /(todo|to-do|週案|授業記録|時間割|学級|クラス|教科|名簿|出席|評価|メモ|長期記憶|写真を読み|画像を読み|登録して|追加して|変更して|削除して|完了に)/;
+  if (internal.test(s)) return false;
+  const current = /(最新|直近|現在の|今の制度|今日のニュース|最近のニュース|速報|今年の|2026年|価格|発売日|天気|法令|制度改正|ニュース|開催中|営業時間|運行状況|アップデート情報)/;
+  return current.test(s);
+}
+
+function aiGetSearchMode() {
+  const mode = state.settings?.ai?.webSearchMode;
+  return ['off','auto','on'].includes(mode) ? mode : 'off';
+}
+function renderAiSearchMode() {
+  const btn = document.getElementById('aiSearchModeBtn');
+  const label = document.getElementById('aiSearchModeLabel');
+  if (!btn || !label) return;
+  const mode = aiGetSearchMode();
+  btn.dataset.mode = mode;
+  label.textContent = mode === 'on' ? 'ON' : mode === 'auto' ? 'AUTO' : 'OFF';
+  const ja = mode === 'on' ? 'オン（常に検索）' : mode === 'auto' ? '自動判定' : 'オフ';
+  btn.setAttribute('aria-label', `Web検索モード: ${ja}`);
+  btn.title = `Web検索: ${ja}。タップで切り替え`;
+}
+function cycleAiSearchMode() {
+  const order = ['off','auto','on'];
+  const next = order[(order.indexOf(aiGetSearchMode()) + 1) % order.length];
+  state.settings.ai.webSearchMode = next;
+  save();
+  renderAiSearchMode();
+  showToast(next === 'off' ? 'Web検索をオフにしました' : next === 'auto' ? 'Web検索を自動判定にしました' : 'Web検索を常時オンにしました');
+}
+
 async function aiCallGemini(contents, _retry = 0) {
   const apiKey = state.settings.ai?.apiKey?.trim();
-  const model  = state.settings.ai?.model?.trim() || 'gemini-3.5-flash';
+  const model  = state.settings.ai?.model?.trim() || 'gemini-3.6-flash';
   if (!apiKey) throw new Error('APIキー未設定');
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
-  // Gemini 3系は「組み込みツール（Google検索）」と「カスタムツール（WEEKYのfunction calling）」を
-  // 同一リクエストで併用できる（Preview機能。2026年3月〜）。トグルボタンや発言内容でのキーワード
-  // 判定は不要で、モデル自身が「これは検索が要る」「これはWEEKY内部データの話だ」を都度判断する。
-  // Gemini 3系以外のモデルではこの組み合わせが未サポートのため、従来通りfunction callingのみ渡す。
   const isGemini3 = /^gemini-3/i.test(model);
+  const useWebSearch = isGemini3 && _aiWebSearchForRequest;
   const body = {
     contents,
-    tools: isGemini3 ? [{ googleSearch: {} }, ...aiToolDeclarations()] : aiToolDeclarations(),
-    systemInstruction: { parts: [{ text: aiSystemInstructionText() }] },
+    tools: useWebSearch ? [{ googleSearch: {} }, ...aiToolDeclarations()] : aiToolDeclarations(),
+    systemInstruction: { parts: [{ text: aiSystemInstructionText() + (useWebSearch
+      ? '\n\n【このターン】Web検索が有効です。外部の最新情報が必要な場合に使い、WEEKY内部データには使わないでください。'
+      : '\n\n【このターン】Web検索は無効です。WEEKY内部ツールと与えられた情報だけで答えてください。') }] },
   };
-  if (isGemini3) body.toolConfig = { includeServerSideToolInvocations: true };
+  if (useWebSearch) body.toolConfig = { includeServerSideToolInvocations: true };
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -4557,6 +4597,9 @@ function aiPushMessage(role, text) {
 let _aiPendingImage=null,_aiImageAnalysisMode=false;function aiClearPendingImage(){_aiPendingImage=null;const i=document.getElementById('aiChatImageInput'),p=document.getElementById('aiAttachmentPreview');if(i)i.value='';if(p)p.hidden=true}function aiPrepareImage(file){return new Promise((ok,no)=>{if(!file?.type?.startsWith('image/'))return no(new Error('画像を選んでください'));const r=new FileReader();r.onload=()=>{const im=new Image();im.onload=()=>{const s=Math.min(1,3200/Math.max(im.naturalWidth,im.naturalHeight)),w=Math.round(im.naturalWidth*s),h=Math.round(im.naturalHeight*s),c=document.createElement('canvas');c.width=w;c.height=h;const x=c.getContext('2d',{alpha:false});x.fillStyle='#fff';x.fillRect(0,0,w,h);x.drawImage(im,0,0,w,h);const u=c.toDataURL('image/jpeg',.92);ok({name:file.name||'撮影画像.jpg',mimeType:'image/jpeg',data:u.split(',')[1]})};im.onerror=()=>no(new Error('画像を読めません'));im.src=r.result};r.onerror=()=>no(new Error('画像を読めません'));r.readAsDataURL(file)})}
 async function sendAiChatMessage(userText) {
   userText=(userText||'').trim();const attachedImage=_aiPendingImage;if((!userText&&!attachedImage)||_aiChatBusy)return;if(!userText&&attachedImage)userText='この画像を読み取り、WEEKYに登録できる予定・ToDo・メモの候補を整理して。';
+  const searchMode = aiGetSearchMode();
+  _aiWebSearchForRequest = searchMode === 'on' || (searchMode === 'auto' && aiShouldUseWebSearch(userText));
+  document.getElementById('aiSearchModeBtn')?.classList.toggle('is-request-searching', _aiWebSearchForRequest);
 
   if (!state.settings.ai?.apiKey?.trim()) {
     aiPushMessage('error', 'APIキーが未設定です。設定 → AI からGemini APIキーを入力してください。');
@@ -4625,6 +4668,8 @@ async function sendAiChatMessage(userText) {
     aiPushMessage('error', `エラー: ${e?.message || e}`);
     renderAiChat();
   } finally {_aiImageAnalysisMode=false;
+    _aiWebSearchForRequest = false;
+    document.getElementById('aiSearchModeBtn')?.classList.remove('is-request-searching');
     _aiChatBusy = false;
     _aiSetChatBusyUi(false);
   }
@@ -6954,7 +6999,7 @@ function renderSettings() {
   if (s('periodsCount'))   s('periodsCount').value    = state.settings.periodsCount;
   if (s('lessonDuration')) s('lessonDuration').value  = state.settings.lessonDuration || 50;
   if (s('aiApiKey'))       s('aiApiKey').value         = state.settings.ai?.apiKey || '';
-  if (s('aiModel'))        s('aiModel').value          = state.settings.ai?.model || 'gemini-3.5-flash';
+  if (s('aiModel'))        s('aiModel').value          = state.settings.ai?.model || 'gemini-3.6-flash';
   if (s('aiSystemPrompt')) s('aiSystemPrompt').value   = state.settings.ai?.systemPrompt || '';
   renderAiMemorySettings();
 
@@ -7076,7 +7121,7 @@ function saveSettings() {
   state.settings.lessonDuration = parseInt(s('lessonDuration')?.value || 50, 10);
   if (!state.settings.ai) state.settings.ai = {};
   state.settings.ai.apiKey       = s('aiApiKey')?.value.trim()       || '';
-  state.settings.ai.model        = s('aiModel')?.value.trim()        || 'gemini-3.5-flash';
+  state.settings.ai.model        = s('aiModel')?.value.trim()        || 'gemini-3.6-flash';
   state.settings.ai.systemPrompt = s('aiSystemPrompt')?.value        || '';
   save();
   renderWeekGrid();
@@ -9444,6 +9489,8 @@ function bindEvents() {
 
   /* ── Hauryuver: AIチャット（サイドバー） ──
      (Decisions: 2026-08-18-weeky-ai-sidebar-gemini-integration) */
+  q('aiSearchModeBtn')?.addEventListener('click', cycleAiSearchMode);
+  renderAiSearchMode();
   q('aiChatAttachBtn')?.addEventListener('click',()=>q('aiChatImageInput')?.click());
   q('aiAttachmentRemove')?.addEventListener('click',aiClearPendingImage);
   q('aiChatImageInput')?.addEventListener('change',async e=>{const f=e.target.files?.[0];if(!f)return;try{_aiPendingImage=await aiPrepareImage(f);document.getElementById('aiAttachmentThumb').src=`data:${_aiPendingImage.mimeType};base64,${_aiPendingImage.data}`;document.getElementById('aiAttachmentName').textContent=_aiPendingImage.name;document.getElementById('aiAttachmentPreview').hidden=false;q('aiChatInput')?.focus()}catch(err){aiClearPendingImage();showToast(err?.message||'画像を読めません')}});

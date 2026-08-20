@@ -15,7 +15,7 @@
   <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png" />
   <link rel="icon" type="image/png" sizes="512x512" href="icons/icon-512.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="stylesheet" href="styles.css?v=H11" />
+  <link rel="stylesheet" href="styles.css?v=H12" />
   <!-- Hauryuver: AIチャットパネル用スタイル。styles.css未編集で完結させるため
        ここに直書き（本体スタイルに合流させたくなったら styles.css へ移動可）。
        (Decisions: 2026-08-18-weeky-ai-sidebar-gemini-integration) -->
@@ -49,6 +49,13 @@
       align-self: flex-start; background: rgba(220,38,38,.16); color: inherit;
       border: 1px solid rgba(220,38,38,.35); border-bottom-left-radius: 4px;
     }
+
+    .ai-chat-head-actions { display:flex; align-items:center; gap:5px; }
+    .ai-search-mode-btn { height:28px; padding:0 8px; border:1px solid rgba(148,163,184,.28); border-radius:999px; background:rgba(255,255,255,.08); color:inherit; display:flex; align-items:center; gap:5px; cursor:pointer; font-size:9.5px; font-weight:800; letter-spacing:.25px; opacity:.72; transition:background .16s,color .16s,border-color .16s,opacity .16s; }
+    .ai-search-mode-btn:hover { opacity:1; }
+    .ai-search-mode-btn[data-mode="auto"] { opacity:1; color:var(--brand); border-color:color-mix(in srgb,var(--brand) 35%,transparent); background:color-mix(in srgb,var(--brand) 9%,transparent); }
+    .ai-search-mode-btn[data-mode="on"] { opacity:1; color:#fff; border-color:var(--brand); background:var(--brand); }
+    .ai-search-mode-btn.is-request-searching { box-shadow:0 0 0 3px color-mix(in srgb,var(--brand) 16%,transparent); }
     .ai-chat-typing { align-self: flex-start; opacity: .6; font-size: 12.5px; padding: 2px 6px; }
     .ai-chat-input-row {
       display: flex; align-items: flex-end; gap: 6px;
@@ -909,14 +916,14 @@
                    (Decisions: 2026-08-18-weeky-ai-sidebar-gemini-integration) -->
               <section class="settings-section hidden" data-cat="ai">
                 <h3>AI（Gemini）</h3>
-                <p class="settings-hint">サイドバーのAIチャットで使うGemini APIの設定です。APIキーはこの端末のみに保存され、外部には送信されません（Gemini API自体への通信を除く）。<a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a>でキーを発行できます。Web検索を自動で使わせたい場合はgemini-3系のモデルを指定してください（例: gemini-3.5-flash）。無料枠の上限に達した場合は<a href="https://ai.dev/rate-limit" target="_blank" rel="noopener">ai.dev/rate-limit</a>で確認できます。</p>
+                <p class="settings-hint">サイドバーのAIチャットで使うGemini APIの設定です。APIキーはこの端末のみに保存され、外部には送信されません（Gemini API自体への通信を除く）。<a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a>でキーを発行できます。Web検索はチャット上部の検索ボタンでOFF・AUTO・ONを切り替えられます。初期状態はOFFです。検索グラウンディングはGoogle側の利用枠・課金条件の対象になる場合があります。無料枠の上限に達した場合は<a href="https://ai.dev/rate-limit" target="_blank" rel="noopener">ai.dev/rate-limit</a>で確認できます。</p>
                 <div class="settings-row">
                   <label for="aiApiKey">APIキー</label>
                   <input type="text" id="aiApiKey" class="settings-input ai-api-key-input" placeholder="AIza…" autocomplete="off" autocapitalize="none" inputmode="text" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-form-type="other" />
                 </div>
                 <div class="settings-row">
                   <label for="aiModel">モデル</label>
-                  <input type="text" id="aiModel" class="settings-input" placeholder="gemini-3.5-flash" autocomplete="off" spellcheck="false" />
+                  <input type="text" id="aiModel" class="settings-input" placeholder="gemini-3.6-flash" autocomplete="off" spellcheck="false" />
                 </div>
                 <div class="settings-row" style="align-items:flex-start;">
                   <label for="aiSystemPrompt">システムプロンプト</label>
@@ -1006,9 +1013,15 @@
         <section class="panel-section ai-chat-panel">
           <div class="panel-section-header">
             <h3>AI</h3>
-            <button class="panel-section-btn" id="aiChatClearBtn" aria-label="会話をクリア" title="会話をクリア">
+            <div class="ai-chat-head-actions">
+              <button type="button" class="ai-search-mode-btn" id="aiSearchModeBtn" data-mode="off" aria-label="Web検索モード: オフ" title="Web検索モードを切り替え">
+                <svg width="14" height="14" viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="10" r="7" stroke="currentColor" stroke-width="1.5"/><path d="M3 10h14M10 3c2 2 3 4.3 3 7s-1 5-3 7M10 3c-2 2-3 4.3-3 7s1 5 3 7" stroke="currentColor" stroke-width="1.25" stroke-linecap="round"/></svg>
+                <span id="aiSearchModeLabel">OFF</span>
+              </button>
+              <button class="panel-section-btn" id="aiChatClearBtn" aria-label="会話をクリア" title="会話をクリア">
               <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 2l10 10M12 2L2 12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-            </button>
+              </button>
+            </div>
           </div>
           <div class="ai-chat-messages" id="aiChatMessages" aria-live="polite">
             <p class="ai-chat-empty" id="aiChatEmpty">ToDoの追加や確認、相談などを話しかけてみてください。</p>
@@ -1462,6 +1475,6 @@
 <script src="vendor/fontkit.umd.min.js"></script>
 <script async src="https://tally.so/widgets/embed.js"></script>
 <script async src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
-<script src="app.js?v=H11"></script>
+<script src="app.js?v=H12"></script>
 </body>
 </html>
