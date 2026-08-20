@@ -5191,3 +5191,9 @@ img { max-width: 100%; display: block; }
 
 .ai-api-key-input{-webkit-text-security:disc;text-security:disc}
 .ai-api-key-input:focus{-webkit-text-security:none;text-security:none}
+
+/* H16: foreground-only wake word mode */
+.ai-chat-mic-btn.is-wake-listening{opacity:1;color:var(--brand);background:color-mix(in srgb,var(--brand) 12%,transparent);box-shadow:0 0 0 3px color-mix(in srgb,var(--brand) 13%,transparent)}
+.ai-wake-status{display:flex;align-items:center;justify-content:center;gap:6px;margin:4px 4px 0;font-size:10.5px;color:var(--brand);font-weight:700}
+.ai-wake-status[hidden]{display:none}.ai-wake-dot{width:7px;height:7px;border-radius:50%;background:var(--brand);box-shadow:0 0 0 0 color-mix(in srgb,var(--brand) 35%,transparent);animation:aiWakePulse 1.6s infinite}
+@keyframes aiWakePulse{70%{box-shadow:0 0 0 7px transparent}100%{box-shadow:0 0 0 0 transparent}}

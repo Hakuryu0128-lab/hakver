@@ -520,7 +520,7 @@
 /* ── Constants ──────────────────────────────────────────── */
 /* Single source of truth for the version. Keep in sync with the ?v= query in
    index.html and CACHE_NAME in service-worker.js. Shown in 設定 → このアプリ. */
-const APP_VERSION = 'H15';
+const APP_VERSION = 'H16';
 const DAYS = ['月', '火', '水', '木', '金']; /* Mon–Fri only */
 const DEFAULT_PERIODS = 6;
 const ACTIVATION_CODES = ['SHUAN-2026'];
@@ -4555,10 +4555,48 @@ function aiPrepareImage(file){return new Promise((ok,no)=>{const r=new FileReade
 async function aiPrepareAttachment(file){const name=file.name||'添付',ext=(name.split('.').pop()||'').toLowerCase(),type=(file.type||'').toLowerCase();if(type.startsWith('image/'))return aiPrepareImage(file);const textLike=type.startsWith('text/')||type==='application/json'||['txt','md','csv','json'].includes(ext);if(textLike){if(file.size>3*1024*1024)throw new Error('テキスト系は3MB以下にしてください');let text=await file.text();if(text.length>AI_TEXT_MAX_CHARS)text=text.slice(0,AI_TEXT_MAX_CHARS)+'\\n...(省略)';return{name,kind:'text',category:ext||'text',mimeType:type||'text/plain',text,size:file.size}}const isPdf=type==='application/pdf'||ext==='pdf',isAudio=type.startsWith('audio/')||['mp3','m4a','wav','aac','ogg','flac','webm'].includes(ext);if(!isPdf&&!isAudio)throw new Error('対応形式: 画像、PDF、音声、TXT、Markdown、CSV、JSON');if(file.size>AI_INLINE_MAX_BYTES)throw new Error('PDF・音声は19MB以下にしてください');const mime=isPdf?'application/pdf':(type||({'mp3':'audio/mpeg','m4a':'audio/mp4','wav':'audio/wav','aac':'audio/aac','ogg':'audio/ogg','flac':'audio/flac','webm':'audio/webm'}[ext]||'audio/webm'));return{name,kind:'binary',category:isPdf?'pdf':'audio',mimeType:mime,data:await aiFileToBase64(file),size:file.size}}
 function aiShowPendingFile(f){const p=document.getElementById('aiAttachmentPreview'),t=document.getElementById('aiAttachmentThumb'),g=document.getElementById('aiAttachmentGeneric'),n=document.getElementById('aiAttachmentName'),info=document.getElementById('aiAttachmentInfo');if(f.preview){t.src=f.preview;t.hidden=false;g.hidden=true}else{t.hidden=true;g.hidden=false;g.textContent=f.category==='pdf'?'📕':f.category==='audio'?'🎙️':f.category==='csv'?'📊':f.category==='json'?'🧩':'📄'}n.textContent=f.name;const mb=f.size>=1048576?(f.size/1048576).toFixed(1)+'MB':Math.max(1,Math.round(f.size/1024))+'KB';info.textContent=(f.category==='audio'?'文字起こし・要約':f.category==='pdf'?'PDFを解析':'内容を解析')+' ・ '+mb;p.hidden=false}
 function aiSpeechText(text){return String(text||'').replace(/```[\s\S]*?```/g,'コードは画面に表示しました。').replace(/https?:\/\/\S+/g,'').replace(/[#*_`>\[\]()]/g,'').replace(/^[\s]*[-+]\s+/gm,'').replace(/\n{2,}/g,'。').replace(/\n/g,'、').trim().slice(0,1200)}
-function aiSpeak(text){if(!('speechSynthesis'in window))return;const plain=aiSpeechText(text);if(!plain)return;window.speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(plain);u.lang='ja-JP';u.rate=1.02;u.pitch=1;const vs=window.speechSynthesis.getVoices();u.voice=vs.find(v=>v.lang?.toLowerCase().startsWith('ja'))||null;window.speechSynthesis.speak(u)}
+function aiSpeak(text){if(!('speechSynthesis'in window))return;const plain=aiSpeechText(text);if(!plain)return;window.speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(plain);u.lang='ja-JP';u.rate=1.02;u.pitch=1;const vs=window.speechSynthesis.getVoices();u.voice=vs.find(v=>v.lang?.toLowerCase().startsWith('ja'))||null;u.onend=()=>{if(_aiWakeEnabled)setTimeout(aiStartWakeRecognition,700)};u.onerror=()=>{if(_aiWakeEnabled)setTimeout(aiStartWakeRecognition,700)};window.speechSynthesis.speak(u)}
+let _aiWakeEnabled=false,_aiWakeRecognition=null,_aiWakeRestartTimer=null,_aiWakeSuppressClick=false;
+const AI_WAKE_WORDS=['ねえweeky','ねぇweeky','hey weeky','ウィーキー','ウィーキ','weeky'];
+function aiNormalizeWakeText(s){return String(s||'').toLowerCase().replace(/[\s、。,.!！?？ー～~]/g,'')}
+function aiWakeSupported(){return !!(window.SpeechRecognition||window.webkitSpeechRecognition)}
+function aiSetWakeUi(on){const mic=document.getElementById('aiChatMicBtn'),status=document.getElementById('aiWakeStatus');mic?.classList.toggle('is-wake-listening',on);if(status)status.hidden=!on;if(mic)mic.title=on?'ウェイクワード待機中。長押しで解除':'タップで録音・長押しでウェイクワード待機'}
+function aiStopWakeRecognition(){clearTimeout(_aiWakeRestartTimer);_aiWakeRestartTimer=null;if(_aiWakeRecognition){_aiWakeRecognition.onend=null;try{_aiWakeRecognition.abort()}catch{} _aiWakeRecognition=null}}
+function aiDisableWakeMode(message='ウェイクワード待機を終了しました'){_aiWakeEnabled=false;aiStopWakeRecognition();aiSetWakeUi(false);aiVoiceStatus(message)}
+function aiStartWakeRecognition(){
+  if(!_aiWakeEnabled||_aiChatBusy||_aiRecording||window.speechSynthesis?.speaking)return;
+  if(!aiWakeSupported()){aiDisableWakeMode('この端末ではウェイクワード待機に対応していません');return}
+  aiStopWakeRecognition();
+  const R=window.SpeechRecognition||window.webkitSpeechRecognition,r=new R();_aiWakeRecognition=r;r.lang='ja-JP';r.continuous=true;r.interimResults=true;r.maxAlternatives=1;
+  r.onresult=e=>{for(let i=e.resultIndex;i<e.results.length;i++){const raw=e.results[i][0]?.transcript||'',t=aiNormalizeWakeText(raw);if(AI_WAKE_WORDS.some(w=>t.includes(aiNormalizeWakeText(w)))){r.onend=null;try{r.stop()}catch{} _aiWakeRecognition=null;aiVoiceStatus('はい、どうぞ。話してください');setTimeout(()=>aiStartVoiceRecording(true),250);return}}};
+  r.onerror=e=>{if(['not-allowed','service-not-allowed'].includes(e.error)){aiDisableWakeMode('マイクまたは音声認識の許可が必要です');return}};
+  r.onend=()=>{_aiWakeRecognition=null;if(_aiWakeEnabled)_aiWakeRestartTimer=setTimeout(aiStartWakeRecognition,700)};
+  try{r.start();aiSetWakeUi(true);aiVoiceStatus('「ねえWEEKY」と話しかけてください')}catch{_aiWakeRestartTimer=setTimeout(aiStartWakeRecognition,900)}
+}
+async function aiToggleWakeMode(){
+  if(_aiWakeEnabled){aiDisableWakeMode();return}
+  if(!aiWakeSupported()){aiVoiceStatus('この端末ではウェイクワード待機に対応していません。通常のマイク入力は使えます。',true);return}
+  try{const s=await navigator.mediaDevices.getUserMedia({audio:true});s.getTracks().forEach(t=>t.stop());_aiWakeEnabled=true;aiSetWakeUi(true);aiStartWakeRecognition()}catch{aiVoiceStatus('マイクの使用を許可してください',true)}
+}
 let _aiRecorder=null,_aiMicStream=null,_aiAudioChunks=[],_aiRecording=false;
 function aiVoiceStatus(text,error=false){const el=document.getElementById('aiVoiceStatus');if(!el)return;el.hidden=!text;el.textContent=text||'';el.classList.toggle('is-error',error)}
-async function aiToggleVoiceInput(){if(_aiChatBusy)return;if(_aiRecording){_aiRecorder?.stop();return}try{window.speechSynthesis?.cancel();_aiMicStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});let mime='';for(const x of ['audio/webm;codecs=opus','audio/webm','audio/mp4'])if(window.MediaRecorder?.isTypeSupported?.(x)){mime=x;break} _aiAudioChunks=[];_aiRecorder=new MediaRecorder(_aiMicStream,mime?{mimeType:mime}:undefined);_aiRecorder.ondataavailable=e=>{if(e.data?.size)_aiAudioChunks.push(e.data)};_aiRecorder.onerror=()=>aiVoiceStatus('録音中にエラーが発生しました',true);_aiRecorder.onstop=async()=>{_aiRecording=false;document.getElementById('aiChatMicBtn')?.classList.remove('is-recording');_aiMicStream?.getTracks().forEach(t=>t.stop());const blob=new Blob(_aiAudioChunks,{type:_aiRecorder.mimeType||'audio/webm'});if(blob.size<1000){aiVoiceStatus('音声を認識できませんでした',true);return}if(blob.size>AI_INLINE_MAX_BYTES){aiVoiceStatus('録音が長すぎます。短く区切ってください',true);return}aiVoiceStatus('音声を文字起こししています…');try{const transcript=await aiTranscribeVoice(blob);if(!transcript)throw new Error('文字起こしできませんでした');const input=document.getElementById('aiChatInput');if(input)input.value=transcript;aiVoiceStatus(`認識: ${transcript}`);_aiVoiceReplyPending=true;setTimeout(()=>sendAiChatMessage(transcript),120)}catch(err){aiVoiceStatus(err?.message||'音声認識に失敗しました',true)}};_aiRecorder.start(250);_aiRecording=true;document.getElementById('aiChatMicBtn')?.classList.add('is-recording');aiVoiceStatus('録音中です。話し終わったらマイクを押してください');}catch(err){aiVoiceStatus(err?.name==='NotAllowedError'?'マイクの使用を許可してください':'マイクを開始できませんでした',true)}}
+async function aiToggleVoiceInput(){if(_aiChatBusy)return;if(_aiRecording){_aiRecorder?.stop();return}aiStopWakeRecognition();await aiStartVoiceRecording(false)}
+async function aiStartVoiceRecording(autoStop=false){
+  if(_aiRecording||_aiChatBusy)return;
+  try{
+    window.speechSynthesis?.cancel();
+    _aiMicStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
+    let mime='';for(const x of ['audio/webm;codecs=opus','audio/webm','audio/mp4'])if(window.MediaRecorder?.isTypeSupported?.(x)){mime=x;break}
+    _aiAudioChunks=[];_aiRecorder=new MediaRecorder(_aiMicStream,mime?{mimeType:mime}:undefined);
+    let audioCtx=null,analyser=null,silenceTimer=null,maxTimer=null,raf=0,heardVoice=false,lastVoice=performance.now();
+    const cleanupMonitor=()=>{cancelAnimationFrame(raf);clearTimeout(maxTimer);clearTimeout(silenceTimer);try{audioCtx?.close()}catch{}};
+    if(autoStop&&window.AudioContext){audioCtx=new AudioContext();const src=audioCtx.createMediaStreamSource(_aiMicStream);analyser=audioCtx.createAnalyser();analyser.fftSize=512;src.connect(analyser);const bins=new Uint8Array(analyser.fftSize);const watch=()=>{if(!_aiRecording)return;analyser.getByteTimeDomainData(bins);let sum=0;for(const v of bins){const d=(v-128)/128;sum+=d*d}const rms=Math.sqrt(sum/bins.length);if(rms>.025){heardVoice=true;lastVoice=performance.now()}if(heardVoice&&performance.now()-lastVoice>1300){_aiRecorder?.stop();return}raf=requestAnimationFrame(watch)};watch();maxTimer=setTimeout(()=>{if(_aiRecording)_aiRecorder?.stop()},20000)}
+    _aiRecorder.ondataavailable=e=>{if(e.data?.size)_aiAudioChunks.push(e.data)};
+    _aiRecorder.onerror=()=>aiVoiceStatus('録音中にエラーが発生しました',true);
+    _aiRecorder.onstop=async()=>{cleanupMonitor();_aiRecording=false;document.getElementById('aiChatMicBtn')?.classList.remove('is-recording');_aiMicStream?.getTracks().forEach(t=>t.stop());const blob=new Blob(_aiAudioChunks,{type:_aiRecorder.mimeType||'audio/webm'});if(blob.size<1000){aiVoiceStatus('音声を認識できませんでした',true);if(_aiWakeEnabled)setTimeout(aiStartWakeRecognition,700);return}if(blob.size>AI_INLINE_MAX_BYTES){aiVoiceStatus('録音が長すぎます。短く区切ってください',true);if(_aiWakeEnabled)setTimeout(aiStartWakeRecognition,700);return}aiVoiceStatus('音声を文字起こししています…');try{const transcript=await aiTranscribeVoice(blob);if(!transcript)throw new Error('文字起こしできませんでした');const input=document.getElementById('aiChatInput');if(input){input.value=transcript;input.style.height='auto'}aiVoiceStatus(`認識: ${transcript}`);_aiVoiceReplyPending=true;setTimeout(()=>{const box=document.getElementById('aiChatInput');if(box){box.value='';box.style.height='auto'}sendAiChatMessage(transcript)},120)}catch(err){aiVoiceStatus(err?.message||'音声認識に失敗しました',true);if(_aiWakeEnabled)setTimeout(aiStartWakeRecognition,700)}};
+    _aiRecorder.start(250);_aiRecording=true;document.getElementById('aiChatMicBtn')?.classList.add('is-recording');aiVoiceStatus(autoStop?'話してください。話し終わると自動で送信します':'録音中です。話し終わったらマイクを押してください');
+  }catch(err){aiVoiceStatus(err?.name==='NotAllowedError'?'マイクの使用を許可してください':'マイクを開始できませんでした',true);if(_aiWakeEnabled)setTimeout(aiStartWakeRecognition,700)}
+}
 async function aiTranscribeVoice(blob){const apiKey=state.settings.ai?.apiKey?.trim(),model=state.settings.ai?.model?.trim()||'gemini-3.5-flash-lite';if(!apiKey)throw new Error('APIキーが未設定です');const data=await aiFileToBase64(new File([blob],'voice.webm',{type:blob.type||'audio/webm'}));const url=`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;const body={contents:[{role:'user',parts:[{text:'この音声の発話内容だけを日本語で正確に文字起こししてください。説明、引用符、前置き、Markdownは不要です。'},{inlineData:{mimeType:blob.type||'audio/webm',data}}]}]};const res=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}),json=await res.json().catch(()=>null);if(!res.ok)throw new Error(json?.error?.message||`音声認識エラー HTTP ${res.status}`);return(json?.candidates?.[0]?.content?.parts||[]).map(p=>p.text||'').join('').trim()}
 
 async function sendAiChatMessage(userText) {
@@ -4619,7 +4657,7 @@ async function sendAiChatMessage(userText) {
         aiPushMessage('ai', finalText);
         if (_aiVoiceReplyPending) { _aiVoiceReplyPending = false; setTimeout(() => aiSpeak(finalText), 350); }
       } else {
-        aiPushMessage('system', '（応答なし）');
+        aiPushMessage('system', '（応答なし）'); if(_aiWakeEnabled)setTimeout(aiStartWakeRecognition,700);
       }
       renderAiChat();
       _aiChatBusy = false;
@@ -4629,7 +4667,7 @@ async function sendAiChatMessage(userText) {
     aiPushMessage('error', 'ツール呼び出しが多すぎて処理を打ち切りました。');
     renderAiChat();
   } catch (e) {
-    aiPushMessage('error', `エラー: ${e?.message || e}`);
+    aiPushMessage('error', `エラー: ${e?.message || e}`); if(_aiVoiceReplyPending){_aiVoiceReplyPending=false;aiSpeak('エラーが発生しました。画面を確認してください。')}else if(_aiWakeEnabled)setTimeout(aiStartWakeRecognition,700);
     renderAiChat();
   } finally {_aiAttachmentAnalysisMode=false;_aiUrlContextForRequest=false;
     _aiChatBusy = false;
@@ -9456,7 +9494,13 @@ function bindEvents() {
   q('aiChatAttachBtn')?.addEventListener('click',()=>q('aiChatImageInput')?.click());
   q('aiAttachmentRemove')?.addEventListener('click',aiClearPendingFile);
   q('aiChatImageInput')?.addEventListener('change',async e=>{const f=e.target.files?.[0];if(!f)return;try{_aiPendingFile=await aiPrepareAttachment(f);aiShowPendingFile(_aiPendingFile);q('aiChatInput')?.focus()}catch(err){aiClearPendingFile();showToast(err?.message||'ファイルを読み込めません')}});
-  q('aiChatMicBtn')?.addEventListener('click',aiToggleVoiceInput);
+  {
+    const mic=q('aiChatMicBtn');let holdTimer=null,longDone=false;
+    const begin=e=>{if(e.type==='touchstart')e.preventDefault();longDone=false;holdTimer=setTimeout(()=>{longDone=true;_aiWakeSuppressClick=true;aiToggleWakeMode()},650)};
+    const endHold=()=>{clearTimeout(holdTimer);holdTimer=null};
+    mic?.addEventListener('pointerdown',begin);mic?.addEventListener('pointerup',endHold);mic?.addEventListener('pointercancel',endHold);mic?.addEventListener('pointerleave',endHold);
+    mic?.addEventListener('click',e=>{if(_aiWakeSuppressClick||longDone){e.preventDefault();_aiWakeSuppressClick=false;return}aiToggleVoiceInput()});
+  }
   q('aiChatForm')?.addEventListener('submit', e => {
     e.preventDefault();
     const input = q('aiChatInput');

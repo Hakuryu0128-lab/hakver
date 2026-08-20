@@ -15,7 +15,7 @@
   <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png" />
   <link rel="icon" type="image/png" sizes="512x512" href="icons/icon-512.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="stylesheet" href="styles.css?v=H15" />
+  <link rel="stylesheet" href="styles.css?v=H16" />
   <!-- Hauryuver: AIチャットパネル用スタイル。styles.css未編集で完結させるため
        ここに直書き（本体スタイルに合流させたくなったら styles.css へ移動可）。
        (Decisions: 2026-08-18-weeky-ai-sidebar-gemini-integration) -->
@@ -1020,7 +1020,7 @@
           <form class="ai-chat-input-row" id="aiChatForm">
             <button type="button" class="ai-chat-attach-btn" id="aiChatAttachBtn" aria-label="ファイルを選ぶ" title="画像・PDF・音声・テキストを選ぶ">📎</button><input type="file" id="aiChatImageInput" accept="image/*,application/pdf,audio/*,.txt,.md,.csv,.json,text/plain,text/markdown,text/csv,application/json" hidden/>
             <textarea class="ai-chat-input" id="aiChatInput" rows="1" placeholder="AIに話しかける…" aria-label="AIへのメッセージ"></textarea>
-            <button type="button" class="ai-chat-mic-btn" id="aiChatMicBtn" aria-label="音声で話す" title="タップして話す">
+            <button type="button" class="ai-chat-mic-btn" id="aiChatMicBtn" aria-label="音声で話す" title="タップで録音・長押しでウェイクワード待機">
               <svg width="17" height="17" viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="7" y="2" width="6" height="10" rx="3" stroke="currentColor" stroke-width="1.7"/><path d="M4.5 9.5a5.5 5.5 0 0011 0M10 15v3M7 18h6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
             </button>
             <button type="submit" class="ai-chat-send-btn" id="aiChatSendBtn" aria-label="送信">
@@ -1028,6 +1028,7 @@
             </button>
           </form>
           <div class="ai-voice-status" id="aiVoiceStatus" hidden aria-live="polite"></div>
+          <div class="ai-wake-status" id="aiWakeStatus" hidden><span class="ai-wake-dot"></span><span>「ねえWEEKY」を待っています</span></div>
         </section>
       </aside>
     </div><!-- /content-area -->
@@ -1469,6 +1470,6 @@
 <script src="vendor/fontkit.umd.min.js"></script>
 <script async src="https://tally.so/widgets/embed.js"></script>
 <script async src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
-<script src="app.js?v=H15"></script>
+<script src="app.js?v=H16"></script>
 </body>
 </html>
