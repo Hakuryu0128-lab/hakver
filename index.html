@@ -15,7 +15,7 @@
   <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png" />
   <link rel="icon" type="image/png" sizes="512x512" href="icons/icon-512.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="stylesheet" href="styles.css?v=H14" />
+  <link rel="stylesheet" href="styles.css?v=H15" />
   <!-- Hauryuver: AIチャットパネル用スタイル。styles.css未編集で完結させるため
        ここに直書き（本体スタイルに合流させたくなったら styles.css へ移動可）。
        (Decisions: 2026-08-18-weeky-ai-sidebar-gemini-integration) -->
@@ -66,7 +66,10 @@
       background: var(--brand, #4f46e5); color: #fff; display: flex; align-items: center; justify-content: center;
     }
     .ai-chat-send-btn:disabled { opacity: .5; cursor: default; }
-    .ai-chat-attach-btn{flex:none;width:30px;height:30px;border:0;border-radius:9px;background:transparent;color:inherit;cursor:pointer}.ai-attachment-preview{display:flex;align-items:center;gap:9px;margin-bottom:7px;padding:8px;border-radius:12px;background:rgba(255,255,255,.1)}.ai-attachment-preview[hidden]{display:none}.ai-attachment-preview img{width:58px;height:58px;object-fit:cover;border-radius:8px}.ai-attachment-generic{width:58px;height:58px;flex:none;display:flex;align-items:center;justify-content:center;border-radius:8px;background:rgba(0,0,0,.08);font-size:29px}.ai-attachment-generic[hidden]{display:none}.ai-attachment-meta{flex:1;min-width:0;display:flex;flex-direction:column}.ai-attachment-meta strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ai-attachment-meta small{opacity:.62}.ai-attachment-remove{border:0;background:transparent;color:inherit;font-size:19px}.ai-chat-msg--ai{white-space:normal;padding:12px 14px}.ai-chat-msg--ai p{margin:0 0 9px}.ai-chat-msg--ai h1,.ai-chat-msg--ai h2,.ai-chat-msg--ai h3{margin:14px 0 7px;text-transform:none}.ai-chat-msg--ai ul{padding-left:22px}.ai-chat-msg--ai strong{font-weight:800}
+    .ai-chat-attach-btn{flex:none;width:30px;height:30px;border:0;border-radius:9px;background:transparent;color:inherit;cursor:pointer}.ai-attachment-preview{display:flex;align-items:center;gap:9px;margin-bottom:7px;padding:8px;border-radius:12px;background:rgba(255,255,255,.1)}.ai-attachment-preview[hidden]{display:none}.ai-attachment-preview img{width:58px;height:58px;object-fit:cover;border-radius:8px}.ai-attachment-meta{flex:1;min-width:0;display:flex;flex-direction:column}.ai-attachment-meta strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ai-attachment-meta small{opacity:.62}.ai-attachment-remove{border:0;background:transparent;color:inherit;font-size:19px}.ai-chat-msg--ai{white-space:normal;padding:12px 14px}.ai-chat-msg--ai p{margin:0 0 9px}.ai-chat-msg--ai h1,.ai-chat-msg--ai h2,.ai-chat-msg--ai h3{margin:14px 0 7px;text-transform:none}.ai-chat-msg--ai ul{padding-left:22px}.ai-chat-msg--ai strong{font-weight:800}
+
+    .ai-attachment-generic{width:58px;height:58px;flex:none;display:flex;align-items:center;justify-content:center;border-radius:8px;background:rgba(0,0,0,.08);font-size:29px}.ai-attachment-generic[hidden]{display:none}
+    .ai-chat-mic-btn{flex:none;width:30px;height:30px;border:0;border-radius:9px;background:transparent;color:inherit;display:flex;align-items:center;justify-content:center;cursor:pointer;opacity:.75;transition:.16s}.ai-chat-mic-btn:hover{opacity:1;background:rgba(255,255,255,.12)}.ai-chat-mic-btn.is-recording{opacity:1;color:#fff;background:#ef4444;box-shadow:0 0 0 4px rgba(239,68,68,.18);animation:aiMicPulse 1.25s ease-in-out infinite}.ai-chat-mic-btn:disabled{opacity:.35;cursor:default}.ai-voice-status{font-size:11px;line-height:1.4;text-align:center;margin:3px 4px 0;opacity:.7}.ai-voice-status.is-error{color:#ef4444;opacity:1}@keyframes aiMicPulse{50%{box-shadow:0 0 0 8px rgba(239,68,68,.04)}}
     .ai-memory-list { display: flex; flex-direction: column; gap: 6px; margin: 6px 0 4px; }
     .ai-memory-row {
       display: flex; align-items: flex-start; justify-content: space-between; gap: 8px;
@@ -909,7 +912,7 @@
                    (Decisions: 2026-08-18-weeky-ai-sidebar-gemini-integration) -->
               <section class="settings-section hidden" data-cat="ai">
                 <h3>AI（Gemini）</h3>
-                <p class="settings-hint">サイドバーのAIチャットで使うGemini APIの設定です。APIキーはこの端末のみに保存され、外部には送信されません（Gemini API自体への通信を除く）。<a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a>でキーを発行できます。URLを貼るとページ内容を読み取れます。画像・PDF・音声・TXT・Markdown・CSV・JSONもチャットへ添付できます。Google検索グラウンディングは使用しません。</p>
+                <p class="settings-hint">サイドバーのAIチャットで使うGemini APIの設定です。APIキーはこの端末のみに保存され、外部には送信されません（Gemini API自体への通信を除く）。<a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a>でキーを発行できます。URLを貼るとページ内容を読み取れます。画像・PDF・音声・TXT・Markdown・CSV・JSONも添付できます。マイク入力した質問には、回答を自動で読み上げます。Google検索グラウンディングは使用しません。</p>
                 <div class="settings-row">
                   <label for="aiApiKey">APIキー</label>
                   <input type="text" id="aiApiKey" class="settings-input ai-api-key-input" placeholder="AIza…" autocomplete="off" autocapitalize="none" inputmode="text" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-form-type="other" />
@@ -1013,14 +1016,18 @@
           <div class="ai-chat-messages" id="aiChatMessages" aria-live="polite">
             <p class="ai-chat-empty" id="aiChatEmpty">ToDoの追加や確認、相談などを話しかけてみてください。</p>
           </div>
-          <div class="ai-attachment-preview" id="aiAttachmentPreview" hidden><img id="aiAttachmentThumb" alt="添付ファイルのプレビュー"/><div class="ai-attachment-generic" id="aiAttachmentGeneric" hidden aria-hidden="true">📄</div><div class="ai-attachment-meta"><strong id="aiAttachmentName"></strong><small id="aiAttachmentInfo">内容を読み取って登録候補を作ります</small></div><button type="button" class="ai-attachment-remove" id="aiAttachmentRemove" aria-label="添付を外す">×</button></div>
+          <div class="ai-attachment-preview" id="aiAttachmentPreview" hidden><img id="aiAttachmentThumb" alt="添付ファイルのプレビュー"/><div class="ai-attachment-generic" id="aiAttachmentGeneric" hidden aria-hidden="true">📄</div><div class="ai-attachment-meta"><strong id="aiAttachmentName"></strong><small id="aiAttachmentInfo">内容を読み取ります</small></div><button type="button" class="ai-attachment-remove" id="aiAttachmentRemove" aria-label="添付を外す">×</button></div>
           <form class="ai-chat-input-row" id="aiChatForm">
             <button type="button" class="ai-chat-attach-btn" id="aiChatAttachBtn" aria-label="ファイルを選ぶ" title="画像・PDF・音声・テキストを選ぶ">📎</button><input type="file" id="aiChatImageInput" accept="image/*,application/pdf,audio/*,.txt,.md,.csv,.json,text/plain,text/markdown,text/csv,application/json" hidden/>
             <textarea class="ai-chat-input" id="aiChatInput" rows="1" placeholder="AIに話しかける…" aria-label="AIへのメッセージ"></textarea>
+            <button type="button" class="ai-chat-mic-btn" id="aiChatMicBtn" aria-label="音声で話す" title="タップして話す">
+              <svg width="17" height="17" viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="7" y="2" width="6" height="10" rx="3" stroke="currentColor" stroke-width="1.7"/><path d="M4.5 9.5a5.5 5.5 0 0011 0M10 15v3M7 18h6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+            </button>
             <button type="submit" class="ai-chat-send-btn" id="aiChatSendBtn" aria-label="送信">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2 8h11M8 3l5 5-5 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
             </button>
           </form>
+          <div class="ai-voice-status" id="aiVoiceStatus" hidden aria-live="polite"></div>
         </section>
       </aside>
     </div><!-- /content-area -->
@@ -1462,6 +1469,6 @@
 <script src="vendor/fontkit.umd.min.js"></script>
 <script async src="https://tally.so/widgets/embed.js"></script>
 <script async src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
-<script src="app.js?v=H14"></script>
+<script src="app.js?v=H15"></script>
 </body>
 </html>
