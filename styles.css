@@ -52,7 +52,7 @@
   /* Layout */
   --sidebar-w:       62px;
   --header-h:        52px;
-  --context-w:       280px;
+  --context-w:       560px;
   --radius-sm:       6px;
   --radius:          10px;
   --radius-lg:       14px;
@@ -974,6 +974,8 @@ img { max-width: 100%; display: block; }
 .grid-cell--slim .tile-icons { display: none; }
 .grid-cell--slim .empty-cell-btn { font-size: 16px; }
 
+/* H4: 右コンテキストパネルを約2倍幅に拡大。今週統計と応援カードを廃止し、
+   AIチャットが残りの高さをすべて使う構成に変更。 */
 /* ── Context Panel ───────────────────────────────────────── */
 /* v11.13.0：デザイン統一Phase1。ヘッダーと同じ理由でborder-left: 1px solid
    var(--border) + 不透明背景を --glass-card-* に統一（settings-sectionと
@@ -984,7 +986,7 @@ img { max-width: 100%; display: block; }
   border-left: 1px solid var(--glass-card-border);
   display: flex;
   flex-direction: column;
-  overflow-y: auto;
+  overflow: hidden;
   scrollbar-width: thin;
   scrollbar-color: var(--gray-300) transparent;
   background: var(--glass-card-bg);
@@ -4105,7 +4107,7 @@ img { max-width: 100%; display: block; }
 
 /* ── < 1280px ── */
 @media (max-width: 1279px) {
-  :root { --context-w: 260px; }
+  :root { --context-w: 520px; }
 }
 
 /* ── < 768px (tablet portrait) ── */
@@ -4118,14 +4120,14 @@ img { max-width: 100%; display: block; }
     top: var(--header-h);
     right: 0; bottom: 0;
     width: 88vw;
-    max-width: 320px;
+    max-width: 560px;
     z-index: 150;
     box-shadow: var(--shadow-lg);
     transform: translateX(100%);
     transition: transform var(--normal) var(--ease);
   }
   .context-panel.open { transform: translateX(0); }
-  .context-panel.collapsed { width: 88vw; max-width: 320px; opacity: 1; transform: translateX(100%); }
+  .context-panel.collapsed { width: 88vw; max-width: 560px; opacity: 1; transform: translateX(100%); }
   .view-page { padding: 16px; }
   .week-grid { grid-template-columns: 40px repeat(5, minmax(80px, 1fr)); }
 }

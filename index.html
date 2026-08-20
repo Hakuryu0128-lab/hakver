@@ -15,14 +15,14 @@
   <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png" />
   <link rel="icon" type="image/png" sizes="512x512" href="icons/icon-512.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="stylesheet" href="styles.css?v=H3" />
+  <link rel="stylesheet" href="styles.css?v=H4" />
   <!-- Hauryuver: AIチャットパネル用スタイル。styles.css未編集で完結させるため
        ここに直書き（本体スタイルに合流させたくなったら styles.css へ移動可）。
        (Decisions: 2026-08-18-weeky-ai-sidebar-gemini-integration) -->
   <style>
-    .ai-chat-panel { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; }
+    .ai-chat-panel { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; overflow: hidden; }
     .ai-chat-messages {
-      flex: 1 1 auto; min-height: 120px; max-height: 320px; overflow-y: auto;
+      flex: 1 1 auto; min-height: 120px; max-height: none; overflow-y: auto;
       display: flex; flex-direction: column; gap: 8px; padding: 2px 2px 6px;
       margin: 4px 0 8px;
     }
@@ -1020,36 +1020,6 @@
             </button>
           </form>
         </section>
-
-        <section class="panel-section">
-          <div class="panel-section-header"><h3>今週</h3></div>
-          <div class="stats-grid">
-            <div class="stat-card">
-              <span class="stat-value" id="statLessons">0</span>
-              <span class="stat-label">授業</span>
-            </div>
-            <div class="stat-card">
-              <span class="stat-value" id="statPhotos">0</span>
-              <span class="stat-label">写真</span>
-            </div>
-            <div class="stat-card">
-              <span class="stat-value" id="statHandwriting">0</span>
-              <span class="stat-label">手書き</span>
-            </div>
-          </div>
-        </section>
-
-        <section class="panel-section support-card" id="supportCard">
-          <button class="support-card-close" aria-label="閉じる" title="閉じる"
-            onclick="document.getElementById('supportCard').style.display='none';try{localStorage.setItem('weeky_support_card_dismissed','1')}catch(e){}">×</button>
-          <div class="support-card-emoji">💛</div>
-          <div class="support-card-title">WEEKYを応援</div>
-          <p class="support-card-text">よければPayPayで応援を。任意・見返りはありません。</p>
-          <button class="support-card-btn"
-            onclick="switchView('settings');showSettingsCategory('support')">応援する</button>
-        </section>
-        <script>try{if(localStorage.getItem('weeky_support_card_dismissed'))document.getElementById('supportCard').style.display='none';}catch(e){}</script>
-
       </aside>
     </div><!-- /content-area -->
     <span id="autosaveStatus" hidden></span>
@@ -1490,6 +1460,6 @@
 <script src="vendor/fontkit.umd.min.js"></script>
 <script async src="https://tally.so/widgets/embed.js"></script>
 <script async src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
-<script src="app.js?v=H3"></script>
+<script src="app.js?v=H4"></script>
 </body>
 </html>
