@@ -520,7 +520,7 @@
 /* ── Constants ──────────────────────────────────────────── */
 /* Single source of truth for the version. Keep in sync with the ?v= query in
    index.html and CACHE_NAME in service-worker.js. Shown in 設定 → このアプリ. */
-const APP_VERSION = 'H9';
+const APP_VERSION = 'H11';
 const DAYS = ['月', '火', '水', '木', '金']; /* Mon–Fri only */
 const DEFAULT_PERIODS = 6;
 const ACTIVATION_CODES = ['SHUAN-2026'];
@@ -638,7 +638,7 @@ const state = {
     lockTimeoutMin: 5,       // 無操作タイムアウト（分）1|3|5|10|30
     ai: {                    // Hauryuver: サイドバーAIチャット用（Gemini API）
       apiKey: '',
-      model: 'gemini-3.7-flash',
+      model: 'gemini-3.5-flash',
       systemPrompt: '',
     },
   },
@@ -730,7 +730,7 @@ async function load() {
     if (data.aiMemory) state.aiMemory = { facts: data.aiMemory.facts || [], mistakes: data.aiMemory.mistakes || [] };
     if (data.settings) Object.assign(state.settings, data.settings);
     // 旧データはsettings.aiを持たないため、Object.assignで消えていないか保険で確認
-    if (!state.settings.ai) state.settings.ai = { apiKey: '', model: 'gemini-3.7-flash', systemPrompt: '' };
+    if (!state.settings.ai) state.settings.ai = { apiKey: '', model: 'gemini-3.5-flash', systemPrompt: '' };
     if (state.settings.viewTransition === 'warp') state.settings.viewTransition = 'pop';  // 廃止した演出のフォールバック
 
     // 旧「ミッドナイト」テーマ＝暗い背景。外観モード導入に伴い、
@@ -4502,9 +4502,9 @@ function aiBuildContentsFromHistory() {
     .map(m => ({ role: m.role === 'ai' ? 'model' : 'user', parts: [{ text: m.text }] }));
 }
 
-async function aiCallGemini(contents) {
+async function aiCallGemini(contents, _retry = 0) {
   const apiKey = state.settings.ai?.apiKey?.trim();
-  const model  = state.settings.ai?.model?.trim() || 'gemini-3.7-flash';
+  const model  = state.settings.ai?.model?.trim() || 'gemini-3.5-flash';
   if (!apiKey) throw new Error('APIキー未設定');
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
   // Gemini 3系は「組み込みツール（Google検索）」と「カスタムツール（WEEKYのfunction calling）」を
@@ -4523,10 +4523,19 @@ async function aiCallGemini(contents) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
+  // 429（レート上限）だけは少し待って自動リトライする。
+  // ToDo/週案/検索を一連のツール呼び出しで連鎖実行する設計上、1回の発言でも
+  // 短時間に複数リクエストが飛ぶため、RPMの低い無料枠モデルでは瞬間的に
+  // バーストして一時的な429を踏みやすい（RPD/日次の枯渇とは別問題）。
+  if (res.status === 429 && _retry < 3) {
+    if (_retry === 0) { aiPushMessage('system', '⏳ 利用上限に一瞬当たったので少し待って再送します…'); renderAiChat(); }
+    await new Promise(r => setTimeout(r, 1500 * (_retry + 1))); // 1.5s → 3s → 4.5s
+    return aiCallGemini(contents, _retry + 1);
+  }
   const data = await res.json().catch(() => null);
   if (!res.ok) {
     const msg = data?.error?.message || `HTTP ${res.status}`;
-    throw new Error(msg);
+    throw new Error(res.status === 429 ? `利用上限（レート制限）に達しています。1分ほど待つか、設定→AIでモデルを変更してください。（${msg}）` : msg);
   }
   const candidate = data?.candidates?.[0];
   if (!candidate) {
@@ -6945,7 +6954,7 @@ function renderSettings() {
   if (s('periodsCount'))   s('periodsCount').value    = state.settings.periodsCount;
   if (s('lessonDuration')) s('lessonDuration').value  = state.settings.lessonDuration || 50;
   if (s('aiApiKey'))       s('aiApiKey').value         = state.settings.ai?.apiKey || '';
-  if (s('aiModel'))        s('aiModel').value          = state.settings.ai?.model || 'gemini-3.7-flash';
+  if (s('aiModel'))        s('aiModel').value          = state.settings.ai?.model || 'gemini-3.5-flash';
   if (s('aiSystemPrompt')) s('aiSystemPrompt').value   = state.settings.ai?.systemPrompt || '';
   renderAiMemorySettings();
 
@@ -7067,7 +7076,7 @@ function saveSettings() {
   state.settings.lessonDuration = parseInt(s('lessonDuration')?.value || 50, 10);
   if (!state.settings.ai) state.settings.ai = {};
   state.settings.ai.apiKey       = s('aiApiKey')?.value.trim()       || '';
-  state.settings.ai.model        = s('aiModel')?.value.trim()        || 'gemini-3.7-flash';
+  state.settings.ai.model        = s('aiModel')?.value.trim()        || 'gemini-3.5-flash';
   state.settings.ai.systemPrompt = s('aiSystemPrompt')?.value        || '';
   save();
   renderWeekGrid();
