@@ -520,7 +520,7 @@
 /* ── Constants ──────────────────────────────────────────── */
 /* Single source of truth for the version. Keep in sync with the ?v= query in
    index.html and CACHE_NAME in service-worker.js. Shown in 設定 → このアプリ. */
-const APP_VERSION = 'H6';
+const APP_VERSION = 'H7';
 const DAYS = ['月', '火', '水', '木', '金']; /* Mon–Fri only */
 const DEFAULT_PERIODS = 6;
 const ACTIVATION_CODES = ['SHUAN-2026'];
@@ -3888,23 +3888,23 @@ function updatePanelTodo() {
 
 const AI_MAX_TOOL_LOOPS = 6;
 
-/* H5: AI向け学級一覧。旧settings.classesではなく、学校・明示学級・名簿・授業記録を統合する。 */
 function aiClassCatalogue() {
-  const bySchool = new Map();
-  (state.schools || []).forEach(sc => bySchool.set(sc.id, { schoolId:sc.id, schoolName:sc.name||'', schoolCode:sc.code||'', isActive:sc.id===state.activeSchoolId, classes:new Map() }));
-  const addClass = (schoolId, rawName, source, meta={}) => {
-    const group=bySchool.get(schoolId); if(!group||!rawName) return;
-    let localName=normClass(rawName), prefix=normClass(group.schoolName);
-    if(prefix && localName.startsWith(prefix)) localName=localName.slice(prefix.length).trim();
-    const parsed=parseClassText(localName); if(!parsed) return;
-    const className=makeClassName(parsed.grade,parsed.classNo), key=normClass(className);
-    if(!group.classes.has(key)) group.classes.set(key,{className,lessonClassName:effectiveClassName(className,schoolId),grade:String(meta.grade||parsed.grade),classNo:String(meta.classNo||parsed.classNo),years:new Set(),studentIds:new Set(),sources:new Set()});
-    const item=group.classes.get(key); if(meta.year)item.years.add(String(meta.year)); if(meta.studentId)item.studentIds.add(String(meta.studentId)); item.sources.add(source);
-  };
-  (state.classes||[]).forEach(c=>addClass(c.schoolId,c.name,'classes',c));
-  (state.students||[]).forEach(s=>addClass(s.schoolId,s.className||deriveClassName(s.grade,s.classNo),'students',{grade:s.grade,classNo:s.classNo,year:s.year,studentId:s.id||s.qrId}));
-  Object.values(state.lessons||{}).forEach(l=>{ const raw=normClass(l&&l.className); if(!raw)return; for(const sc of (state.schools||[])){const prefix=normClass(sc.name);if(prefix&&raw.startsWith(prefix)){addClass(sc.id,raw,'lessons');return;}} if((state.schools||[]).length===1)addClass(state.schools[0].id,raw,'lessons'); });
-  const schools=[...bySchool.values()].map(g=>({schoolId:g.schoolId,schoolName:g.schoolName,schoolCode:g.schoolCode,isActive:g.isActive,classes:[...g.classes.values()].map(c=>({className:c.className,lessonClassName:c.lessonClassName,grade:c.grade,classNo:c.classNo,years:[...c.years].sort(),studentCount:c.studentIds.size,sources:[...c.sources].sort()})).sort((a,b)=>a.className.localeCompare(b.className,'ja',{numeric:true}))}));
+  const schools = (state.schools || []).map(sc => {
+    const map = new Map();
+    const add = (raw, source, meta = {}) => {
+      let name = normClass(raw); const prefix = normClass(sc.name);
+      if (prefix && name.startsWith(prefix)) name = name.slice(prefix.length).trim();
+      const p = parseClassText(name); if (!p) return;
+      const className = makeClassName(p.grade, p.classNo); const key = normClass(className);
+      if (!map.has(key)) map.set(key, { className, lessonClassName: effectiveClassName(className, sc.id), grade:String(p.grade), classNo:String(p.classNo), years:new Set(), students:new Set(), sources:new Set() });
+      const x=map.get(key); if(meta.year)x.years.add(String(meta.year)); if(meta.studentId)x.students.add(String(meta.studentId)); x.sources.add(source);
+    };
+    (state.classes||[]).filter(c=>c.schoolId===sc.id).forEach(c=>add(c.name,'classes',c));
+    (state.students||[]).filter(s=>s.schoolId===sc.id).forEach(s=>add(s.className||deriveClassName(s.grade,s.classNo),'students',{year:s.year,studentId:s.id||s.qrId}));
+    Object.values(state.lessons||{}).forEach(l=>{ const raw=normClass(l?.className); if(raw && normClass(sc.name) && raw.startsWith(normClass(sc.name))) add(raw,'lessons'); });
+    return { schoolId:sc.id, schoolName:sc.name, schoolCode:sc.code||'', isActive:sc.id===state.activeSchoolId,
+      classes:[...map.values()].map(x=>({className:x.className,lessonClassName:x.lessonClassName,grade:x.grade,classNo:x.classNo,years:[...x.years].sort(),studentCount:x.students.size,sources:[...x.sources].sort()})).sort((a,b)=>a.className.localeCompare(b.className,'ja',{numeric:true})) };
+  });
   return {ok:true,activeSchoolId:state.activeSchoolId||'',activeSchoolName:schoolById(state.activeSchoolId)?.name||'',schoolCount:schools.length,classCount:schools.reduce((n,s)=>n+s.classes.length,0),schools};
 }
 
@@ -4021,7 +4021,7 @@ function aiToolDeclarations() {
       },
       {
         name: 'list_classes',
-        description: '全学校の登録学級を学校別に取得する。明示学級・名簿・授業記録を統合し、学校ID・学校名・学級名・生徒数を返す。set_lessonのclassNameには必ずlessonClassNameを使う。',
+        description: '全学校の登録学級を学校別に取得する。名簿・明示学級・授業記録を統合する。set_lessonにはlessonClassNameを使う。',
         parameters: { type: 'object', properties: {} },
       },
       {
@@ -4151,7 +4151,8 @@ const AI_TOOL_LABELS = {
   delete_note: 'メモを削除',
 };
 
-function aiExecuteTool(name, args) {
+function aiExecuteTool(name,args){
+  if(_aiImageAnalysisMode&&['add_todo','toggle_todo','update_todo','delete_todo','set_lesson','delete_lesson','add_note','update_note','delete_note'].includes(name))return {error:'confirmation_required',message:'画像の初回解析では登録候補だけ提示してください'};
   args = args || {};
   try {
     switch (name) {
@@ -4284,10 +4285,10 @@ function aiExecuteTool(name, args) {
         const prev = state.lessons[key] || {};
         let nextClassName = args.className !== undefined ? String(args.className || '') : (prev.className || '');
         if (args.className !== undefined && nextClassName) {
-          const validClasses = aiClassCatalogue().schools.flatMap(s => s.classes.map(c => c.lessonClassName));
-          const matched = validClasses.find(c => normClass(c) === normClass(nextClassName));
-          if (!matched) return { error: 'unknown className', className: nextClassName, hint: 'list_classesのlessonClassNameを使用してください' };
-          nextClassName = matched;
+          const valid = aiClassCatalogue().schools.flatMap(s => s.classes.map(c => c.lessonClassName));
+          const match = valid.find(c => normClass(c) === normClass(nextClassName));
+          if (!match) return { error:'unknown className', hint:'list_classesのlessonClassNameを使用してください' };
+          nextClassName = match;
         }
         state.lessons[key] = {
           ...prev,
@@ -4447,9 +4448,7 @@ function aiSystemInstructionText() {
     'あなたはWEEKY（教員向け授業記録・週案管理アプリ）のサイドバーに常駐するAIアシスタントです。' +
     'ユーザーは中学校の技術・情報科の先生です。日本語で、簡潔かつフランクに答えてください。\n\n' +
     'ToDo・週案（授業記録）・メモの操作が必要な時は、必ず用意されているツールを使って実行し、' +
-    '内容を推測だけで済ませないでください。学級について質問されたらlist_classesを使い、schools配列を学校ごとに確認してください。' +
-    '複数校では同名学級を混同せず、週案を編集する際のclassNameにはlist_classesが返すlessonClassNameをそのまま使ってください。' +
-    '週案を編集する前はlist_subjects/list_classesで有効な値を、' +
+    '内容を推測だけで済ませないでください。週案を編集する前はlist_subjects/list_classesで有効な値を、' +
     'idが必要な操作の前はlist_todos/list_notes/list_memoryで対象のidを確認すること。\n\n' +
     `今日の日付は ${formatDate(new Date())} です。\n\n` +
     '【長期記憶（ユーザーについて覚えていること）】\n' + factsText + '\n\n' +
@@ -4457,7 +4456,9 @@ function aiSystemInstructionText() {
     'ユーザーから「今後は~して」「私は~だ」のような、今後も踏まえてほしい情報を言われたらremember_factで保存すること。' +
     'ユーザーから明示的な訂正を受け、それが再発しうるパターンなら、record_mistakeで記録すること' +
     '（一回限りの単純ミスまで逐一記録する必要はない）。';
-  return custom ? `${base}\n\n【ユーザーからの追加指示】\n${custom}` : base;
+  const imageRule=_aiImageAnalysisMode?'\n\n【画像入力】画像内の文字をOCRし、日付・時刻・締切・学校・学級・教科・件名を整理する。list_classesとlist_subjectsで照合する。初回は変更ツールを実行せず、Markdownで「読み取った内容」「登録候補」「確認が必要な点」を示し、最後に「登録して、と言われたら実行します」と伝える。曖昧な文字は推測で確定しない。個人情報が見える場合は取扱注意を伝える。':'';
+  const full=base+imageRule;
+  return custom ? `${full}\n\n【ユーザーからの追加指示】\n${custom}` : full;
 }
 
 /* 表示用ログ(state.aiChat.messages)からGemini APIのcontents形式を組み立てる */
@@ -4504,9 +4505,16 @@ function aiPushMessage(role, text) {
   save();
 }
 
+let _aiPendingImage=null; let _aiImageAnalysisMode=false;
+function aiClearPendingImage(){_aiPendingImage=null;const i=document.getElementById('aiChatImageInput'),p=document.getElementById('aiAttachmentPreview'),t=document.getElementById('aiAttachmentThumb');if(i)i.value='';if(t)t.removeAttribute('src');if(p)p.hidden=true}
+function aiShowPendingImage(x){document.getElementById('aiAttachmentThumb').src=`data:${x.mimeType};base64,${x.data}`;document.getElementById('aiAttachmentName').textContent=x.name;document.getElementById('aiAttachmentPreview').hidden=false}
+function aiPrepareImage(file){return new Promise((ok,no)=>{if(!file?.type?.startsWith('image/'))return no(new Error('画像を選んでください'));const r=new FileReader();r.onerror=()=>no(new Error('画像を読み込めません'));r.onload=()=>{const im=new Image();im.onerror=()=>no(new Error('JPEGまたはPNGを試してください'));im.onload=()=>{const s=Math.min(1,2000/Math.max(im.naturalWidth,im.naturalHeight)),w=Math.max(1,Math.round(im.naturalWidth*s)),h=Math.max(1,Math.round(im.naturalHeight*s)),c=document.createElement('canvas');c.width=w;c.height=h;const x=c.getContext('2d',{alpha:false});x.fillStyle='#fff';x.fillRect(0,0,w,h);x.drawImage(im,0,0,w,h);const u=c.toDataURL('image/jpeg',.86);ok({name:file.name||'撮影画像.jpg',mimeType:'image/jpeg',data:u.split(',')[1]})};im.src=r.result};r.readAsDataURL(file)})}
+
 async function sendAiChatMessage(userText) {
-  userText = (userText || '').trim();
-  if (!userText || _aiChatBusy) return;
+  userText=(userText||'').trim();
+  const attachedImage=_aiPendingImage;
+  if((!userText&&!attachedImage)||_aiChatBusy)return;
+  if(!userText&&attachedImage)userText='この画像を読み取り、WEEKYに登録できる予定・ToDo・メモの候補を整理して。';
 
   if (!state.settings.ai?.apiKey?.trim()) {
     aiPushMessage('error', 'APIキーが未設定です。設定 → AI からGemini APIキーを入力してください。');
@@ -4514,13 +4522,14 @@ async function sendAiChatMessage(userText) {
     return;
   }
 
-  aiPushMessage('user', userText);
+  aiPushMessage('user', attachedImage ? `📎 ${attachedImage.name}\n${userText}` : userText);
   renderAiChat();
 
   _aiChatBusy = true;
   _aiSetChatBusyUi(true);
 
-  let contents = aiBuildContentsFromHistory();
+  let contents=aiBuildContentsFromHistory();
+  if(attachedImage&&contents.length){contents[contents.length-1].parts=[{text:userText},{inlineData:{mimeType:attachedImage.mimeType,data:attachedImage.data}}];_aiImageAnalysisMode=true;aiClearPendingImage();}
 
   try {
     for (let i = 0; i < AI_MAX_TOOL_LOOPS; i++) {
@@ -4562,6 +4571,7 @@ async function sendAiChatMessage(userText) {
     aiPushMessage('error', `エラー: ${e?.message || e}`);
     renderAiChat();
   } finally {
+    _aiImageAnalysisMode=false;
     _aiChatBusy = false;
     _aiSetChatBusyUi(false);
   }
@@ -4569,9 +4579,10 @@ async function sendAiChatMessage(userText) {
 
 function _aiSetChatBusyUi(busy) {
   const btn = document.getElementById('aiChatSendBtn');
-  const input = document.getElementById('aiChatInput');
+  const input=document.getElementById('aiChatInput');
+  const attach=document.getElementById('aiChatAttachBtn');
   if (btn) btn.disabled = busy;
-  if (input) input.disabled = busy;
+  if(input)input.disabled=busy; if(attach)attach.disabled=busy;
   const box = document.getElementById('aiChatMessages');
   if (!box) return;
   let typing = document.getElementById('aiChatTyping');
@@ -4591,40 +4602,12 @@ function _aiSetChatBusyUi(busy) {
 
 const AI_ROLE_CLASS = { user: 'ai-chat-msg--user', ai: 'ai-chat-msg--ai', system: 'ai-chat-msg--system', error: 'ai-chat-msg--error' };
 
-/* H6: GeminiのMarkdownを安全なHTMLへ変換する軽量レンダラー。外部CDN不要・オフライン対応。 */
 function aiMarkdownHtml(source) {
-  const escapeHtml = s => String(s).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
-  const inline = raw => {
-    let s = escapeHtml(raw);
-    const code = [];
-    s = s.replace(/`([^`\n]+)`/g, (_,v) => `\u0000C${code.push(v)-1}\u0000`);
-    s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
-    s = s.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
-    s = s.replace(/__([^_\n]+)__/g, '<strong>$1</strong>');
-    s = s.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>');
-    s = s.replace(/(^|[^_])_([^_\n]+)_/g, '$1<em>$2</em>');
-    s = s.replace(/\u0000C(\d+)\u0000/g, (_,i) => `<code>${code[Number(i)]}</code>`);
-    return s;
-  };
-  const text = String(source || '').replace(/<br\s*\/?>/gi, '\n').replace(/\r\n?/g, '\n');
-  const lines = text.split('\n'), out=[]; let para=[], list=null, fence=false, fenceLines=[];
-  const flushPara=()=>{ if(para.length){ out.push(`<p>${para.map(inline).join('<br>')}</p>`); para=[]; } };
-  const flushList=()=>{ if(list){ out.push(`<${list.type}>${list.items.map(x=>`<li>${inline(x)}</li>`).join('')}</${list.type}>`); list=null; } };
-  for (const line of lines) {
-    if (/^```/.test(line)) { flushPara(); flushList(); if(fence){out.push(`<pre><code>${escapeHtml(fenceLines.join('\n'))}</code></pre>`);fenceLines=[];} fence=!fence; continue; }
-    if (fence) { fenceLines.push(line); continue; }
-    let m;
-    if (!line.trim()) { flushPara(); flushList(); continue; }
-    if (/^\s*---+\s*$/.test(line)) { flushPara(); flushList(); out.push('<hr>'); continue; }
-    if ((m=line.match(/^(#{1,4})\s+(.+)$/))) { flushPara(); flushList(); const n=m[1].length; out.push(`<h${n}>${inline(m[2])}</h${n}>`); continue; }
-    if ((m=line.match(/^\s*[-*+]\s+(.+)$/))) { flushPara(); if(!list||list.type!=='ul'){flushList();list={type:'ul',items:[]};} list.items.push(m[1]); continue; }
-    if ((m=line.match(/^\s*\d+[.)]\s+(.+)$/))) { flushPara(); if(!list||list.type!=='ol'){flushList();list={type:'ol',items:[]};} list.items.push(m[1]); continue; }
-    if ((m=line.match(/^>\s?(.*)$/))) { flushPara(); flushList(); out.push(`<blockquote>${inline(m[1])}</blockquote>`); continue; }
-    flushList(); para.push(line);
-  }
-  if(fenceLines.length) out.push(`<pre><code>${escapeHtml(fenceLines.join('\n'))}</code></pre>`);
-  flushPara(); flushList();
-  return out.join('');
+  const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const inline=raw=>{ let s=esc(raw); const code=[]; s=s.replace(/`([^`\n]+)`/g,(_,v)=>`\u0000C${code.push(v)-1}\u0000`); s=s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,'<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>'); s=s.replace(/\*\*([^*\n]+)\*\*/g,'<strong>$1</strong>').replace(/__([^_\n]+)__/g,'<strong>$1</strong>').replace(/(^|[^*])\*([^*\n]+)\*/g,'$1<em>$2</em>'); return s.replace(/\u0000C(\d+)\u0000/g,(_,i)=>`<code>${code[+i]}</code>`); };
+  const lines=String(source||'').replace(/<br\s*\/?>/gi,'\n').replace(/\r\n?/g,'\n').split('\n'),out=[]; let p=[],list=null;
+  const fp=()=>{if(p.length){out.push(`<p>${p.map(inline).join('<br>')}</p>`);p=[]}}; const fl=()=>{if(list){out.push(`<${list.t}>${list.a.map(x=>`<li>${inline(x)}</li>`).join('')}</${list.t}>`);list=null}};
+  for(const line of lines){let m;if(!line.trim()){fp();fl();continue} if(/^\s*---+\s*$/.test(line)){fp();fl();out.push('<hr>');continue} if((m=line.match(/^(#{1,4})\s+(.+)$/))){fp();fl();out.push(`<h${m[1].length}>${inline(m[2])}</h${m[1].length}>`);continue} if((m=line.match(/^\s*[-*+]\s+(.+)$/))){fp();if(!list||list.t!=='ul'){fl();list={t:'ul',a:[]}}list.a.push(m[1]);continue} if((m=line.match(/^\s*\d+[.)]\s+(.+)$/))){fp();if(!list||list.t!=='ol'){fl();list={t:'ol',a:[]}}list.a.push(m[1]);continue} fl();p.push(line)} fp();fl();return out.join('');
 }
 
 
@@ -9417,6 +9400,10 @@ function bindEvents() {
 
   /* ── Hauryuver: AIチャット（サイドバー） ──
      (Decisions: 2026-08-18-weeky-ai-sidebar-gemini-integration) */
+  q('aiChatAttachBtn')?.addEventListener('click',()=>q('aiChatImageInput')?.click());
+  q('aiAttachmentRemove')?.addEventListener('click',aiClearPendingImage);
+  q('aiChatImageInput')?.addEventListener('change',async e=>{const file=e.target.files?.[0];if(!file)return;const yes=await customConfirm('この画像はGemini APIへ送信されます。生徒名・顔・学籍番号などの個人情報が写っていないか確認しましたか？');if(!yes){aiClearPendingImage();return}try{_aiPendingImage=await aiPrepareImage(file);aiShowPendingImage(_aiPendingImage);q('aiChatInput')?.focus()}catch(err){aiClearPendingImage();showToast(err?.message||'画像を読み込めませんでした')}});
+
   q('aiChatForm')?.addEventListener('submit', e => {
     e.preventDefault();
     const input = q('aiChatInput');
