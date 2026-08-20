@@ -520,7 +520,7 @@
 /* ── Constants ──────────────────────────────────────────── */
 /* Single source of truth for the version. Keep in sync with the ?v= query in
    index.html and CACHE_NAME in service-worker.js. Shown in 設定 → このアプリ. */
-const APP_VERSION = 'H13';
+const APP_VERSION = 'H14';
 const DAYS = ['月', '火', '水', '木', '金']; /* Mon–Fri only */
 const DEFAULT_PERIODS = 6;
 const ACTIVATION_CODES = ['SHUAN-2026'];
@@ -4160,7 +4160,7 @@ const AI_TOOL_LABELS = {
   delete_note: 'メモを削除',
 };
 
-function aiExecuteTool(name,args){if((_aiImageAnalysisMode||_aiUrlContextForRequest)&&['add_todo','set_lesson','add_note','update_todo','delete_todo','delete_lesson','toggle_todo','update_note','delete_note'].includes(name))return{error:'confirmation_required',message:'URLまたは画像の初回解析では登録候補だけ提示してください'};
+function aiExecuteTool(name,args){if((_aiAttachmentAnalysisMode||_aiUrlContextForRequest)&&['add_todo','set_lesson','add_note','update_todo','delete_todo','delete_lesson','toggle_todo','update_note','delete_note','remember_fact','forget_fact','record_mistake','forget_mistake'].includes(name))return{error:'confirmation_required',message:'資料の初回解析では登録候補だけ提示してください'};
   args = args || {};
   try {
     switch (name) {
@@ -4503,10 +4503,9 @@ function aiBuildContentsFromHistory() {
 }
 
 let _aiUrlContextForRequest = false;
-
 function aiExtractUrls(text) {
-  const matches = String(text || '').match(/https?:\/\/[^\s<>"')\]}]+/gi) || [];
-  return [...new Set(matches.map(u => u.replace(/[.,;:!?、。）」』】]+$/g, '')))].slice(0, 5);
+  const found = String(text || '').match(/https?:\/\/[^\s<>"')\]}]+/gi) || [];
+  return [...new Set(found.map(u => u.replace(/[.,;:!?、。）」』】]+$/g, '')))].slice(0, 5);
 }
 
 async function aiCallGemini(contents, _retry = 0) {
@@ -4514,13 +4513,11 @@ async function aiCallGemini(contents, _retry = 0) {
   const model  = state.settings.ai?.model?.trim() || 'gemini-3.5-flash-lite';
   if (!apiKey) throw new Error('APIキー未設定');
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
-  // Google検索は使わない。ユーザーがURLを貼ったターンだけURL Contextを追加する。
-  // 通常会話・ToDo・週案操作は組み込み有料ツールの制限に巻き込まれない。
   const body = {
     contents,
     tools: _aiUrlContextForRequest ? [{ urlContext: {} }, ...aiToolDeclarations()] : aiToolDeclarations(),
-    systemInstruction: { parts: [{ text: aiSystemInstructionText() + (_aiUrlContextForRequest
-      ? '\n\n【URL入力時】ユーザーが貼ったURLの内容をURL Contextで取得し、ページに書かれている事実に基づいて回答してください。日付・締切・予定・学校・学級・教科・提出物があれば整理し、WEEKYへ登録できる候補をMarkdownで提示してください。最初の応答では変更ツールを実行せず、最後に「登録して、と言われたら実行します」と伝えてください。取得できないURLは推測せず、その旨を伝えてください。'
+    systemInstruction: { parts: [{ text: aiSystemInstructionText() + ((_aiUrlContextForRequest || _aiAttachmentAnalysisMode)
+      ? '\n\n【資料の初回解析】添付またはURLの内容を読み取り、要約してください。音声なら文字起こし・話者・重要事項・決定事項・期限・担当・ToDo候補を整理してください。PDF・画像・テキスト・CSV・JSONなら日付・締切・予定・提出物・学校・学級・教科を抽出し、ToDo・週案・メモ候補をMarkdownで提示してください。曖昧な箇所は推測で確定しないでください。初回は変更ツールを使わず、最後に「登録して、と言われたら実行します」と伝えてください。'
       : '\n\n【通常時】Web検索は使用できません。WEEKY内部ツールと会話内の情報だけで答えてください。') }] },
   };
   if (_aiUrlContextForRequest) body.toolConfig = { includeServerSideToolInvocations: true };
@@ -4560,14 +4557,44 @@ function aiPushMessage(role, text) {
   save();
 }
 
-let _aiPendingImage=null,_aiImageAnalysisMode=false;function aiClearPendingImage(){_aiPendingImage=null;const i=document.getElementById('aiChatImageInput'),p=document.getElementById('aiAttachmentPreview');if(i)i.value='';if(p)p.hidden=true}function aiPrepareImage(file){return new Promise((ok,no)=>{if(!file?.type?.startsWith('image/'))return no(new Error('画像を選んでください'));const r=new FileReader();r.onload=()=>{const im=new Image();im.onload=()=>{const s=Math.min(1,3200/Math.max(im.naturalWidth,im.naturalHeight)),w=Math.round(im.naturalWidth*s),h=Math.round(im.naturalHeight*s),c=document.createElement('canvas');c.width=w;c.height=h;const x=c.getContext('2d',{alpha:false});x.fillStyle='#fff';x.fillRect(0,0,w,h);x.drawImage(im,0,0,w,h);const u=c.toDataURL('image/jpeg',.92);ok({name:file.name||'撮影画像.jpg',mimeType:'image/jpeg',data:u.split(',')[1]})};im.onerror=()=>no(new Error('画像を読めません'));im.src=r.result};r.onerror=()=>no(new Error('画像を読めません'));r.readAsDataURL(file)})}
-async function sendAiChatMessage(userText) {
-  userText=(userText||'').trim();const attachedImage=_aiPendingImage;if((!userText&&!attachedImage)||_aiChatBusy)return;if(!userText&&attachedImage)userText='この画像を読み取り、WEEKYに登録できる予定・ToDo・メモの候補を整理して。';
-  const sharedUrls = aiExtractUrls(userText);
-  _aiUrlContextForRequest = sharedUrls.length > 0;
-  if (_aiUrlContextForRequest && sharedUrls.length === 1 && userText === sharedUrls[0]) {
-    userText = `次のURLの内容を読み取り、要点とWEEKYに登録できる予定・ToDo・メモの候補を整理して。\n${sharedUrls[0]}`;
+let _aiPendingFile = null, _aiAttachmentAnalysisMode = false;
+const AI_INLINE_MAX_BYTES = 19 * 1024 * 1024;
+const AI_TEXT_MAX_CHARS = 300000;
+function aiClearPendingFile(){
+  _aiPendingFile=null;
+  const i=document.getElementById('aiChatImageInput'),p=document.getElementById('aiAttachmentPreview'),t=document.getElementById('aiAttachmentThumb');
+  if(i)i.value=''; if(p)p.hidden=true; if(t){t.removeAttribute('src');t.hidden=true;}
+}
+function aiFileToBase64(file){return new Promise((ok,no)=>{const r=new FileReader();r.onload=()=>ok(String(r.result).split(',')[1]);r.onerror=()=>no(new Error('ファイルを読み込めません'));r.readAsDataURL(file)})}
+function aiPrepareImage(file){return new Promise((ok,no)=>{const r=new FileReader();r.onload=()=>{const im=new Image();im.onload=()=>{const s=Math.min(1,3200/Math.max(im.naturalWidth,im.naturalHeight)),w=Math.max(1,Math.round(im.naturalWidth*s)),h=Math.max(1,Math.round(im.naturalHeight*s)),c=document.createElement('canvas');c.width=w;c.height=h;const x=c.getContext('2d',{alpha:false});x.fillStyle='#fff';x.fillRect(0,0,w,h);x.drawImage(im,0,0,w,h);const u=c.toDataURL('image/jpeg',.92);ok({name:file.name||'画像.jpg',kind:'binary',category:'image',mimeType:'image/jpeg',data:u.split(',')[1],preview:u,size:Math.round(u.length*.75)})};im.onerror=()=>no(new Error('この画像形式は読み込めません。JPEG・PNG・WebPを試してください'));im.src=r.result};r.onerror=()=>no(new Error('画像を読み込めません'));r.readAsDataURL(file)})}
+async function aiPrepareAttachment(file){
+  if(!file)throw new Error('ファイルを選んでください');
+  const name=file.name||'添付ファイル', ext=(name.split('.').pop()||'').toLowerCase(), type=(file.type||'').toLowerCase();
+  if(type.startsWith('image/'))return aiPrepareImage(file);
+  const textLike=type.startsWith('text/')||type==='application/json'||['txt','md','csv','json'].includes(ext);
+  if(textLike){
+    if(file.size>3*1024*1024)throw new Error('テキスト系ファイルは3MB以下にしてください');
+    let text=await file.text(); if(text.length>AI_TEXT_MAX_CHARS)text=text.slice(0,AI_TEXT_MAX_CHARS)+'\\n...(長いため省略)';
+    return{name,kind:'text',category:ext||'text',mimeType:type||'text/plain',text,size:file.size};
   }
+  const isPdf=type==='application/pdf'||ext==='pdf', isAudio=type.startsWith('audio/')||['mp3','m4a','wav','aac','ogg','flac','webm'].includes(ext);
+  if(!isPdf&&!isAudio)throw new Error('対応形式: 画像、PDF、音声、TXT、Markdown、CSV、JSON');
+  if(file.size>AI_INLINE_MAX_BYTES)throw new Error('PDF・音声は19MB以下にしてください');
+  const mime=isPdf?'application/pdf':(type||({'mp3':'audio/mpeg','m4a':'audio/mp4','wav':'audio/wav','aac':'audio/aac','ogg':'audio/ogg','flac':'audio/flac','webm':'audio/webm'}[ext]||'audio/mpeg'));
+  return{name,kind:'binary',category:isPdf?'pdf':'audio',mimeType:mime,data:await aiFileToBase64(file),size:file.size};
+}
+function aiShowPendingFile(f){
+  const p=document.getElementById('aiAttachmentPreview'),t=document.getElementById('aiAttachmentThumb'),g=document.getElementById('aiAttachmentGeneric'),n=document.getElementById('aiAttachmentName'),info=document.getElementById('aiAttachmentInfo');
+  if(f.preview){t.src=f.preview;t.hidden=false;g.hidden=true}else{t.hidden=true;g.hidden=false;g.textContent=f.category==='pdf'?'📕':f.category==='audio'?'🎙️':f.category==='csv'?'📊':f.category==='json'?'🧩':'📄'}
+  n.textContent=f.name; const mb=f.size>=1024*1024?(f.size/1024/1024).toFixed(1)+'MB':Math.max(1,Math.round(f.size/1024))+'KB';
+  info.textContent=(f.category==='audio'?'文字起こし・要約':f.category==='pdf'?'PDFを解析':'内容を解析')+' ・ '+mb; p.hidden=false;
+}
+
+async function sendAiChatMessage(userText) {
+  userText=(userText||'').trim();const attachedFile=_aiPendingFile;if((!userText&&!attachedFile)||_aiChatBusy)return;
+  if(!userText&&attachedFile)userText=attachedFile.category==='audio'?'この録音を文字起こしして要約し、決定事項・期限・担当・ToDo候補を整理して。':'このファイルを読み取り、要点とWEEKYに登録できる予定・ToDo・メモの候補を整理して。';
+  const sharedUrls=aiExtractUrls(userText);_aiUrlContextForRequest=sharedUrls.length>0;
+  if(_aiUrlContextForRequest&&sharedUrls.length===1&&userText===sharedUrls[0])userText=`次のURLの内容を読み取り、要点と登録候補を整理して。\n${sharedUrls[0]}`;
 
   if (!state.settings.ai?.apiKey?.trim()) {
     aiPushMessage('error', 'APIキーが未設定です。設定 → AI からGemini APIキーを入力してください。');
@@ -4575,18 +4602,28 @@ async function sendAiChatMessage(userText) {
     return;
   }
 
-  aiPushMessage('user',attachedImage?`📎 ${attachedImage.name}\n${userText}`:userText);
+  aiPushMessage('user',attachedFile?`📎 ${attachedFile.name}\n${userText}`:userText);
   renderAiChat();
 
   _aiChatBusy = true;
   _aiSetChatBusyUi(true);
 
-  let contents=aiBuildContentsFromHistory();if(attachedImage&&contents.length){contents[contents.length-1].parts=[{text:userText},{inlineData:{mimeType:attachedImage.mimeType,data:attachedImage.data}}];_aiImageAnalysisMode=true;aiClearPendingImage();}
+  let contents=aiBuildContentsFromHistory();if(attachedFile&&contents.length){const parts=[{text:userText}];if(attachedFile.kind==='text')parts.push({text:`\n\n【添付ファイル: ${attachedFile.name}】\n${attachedFile.text}`});else parts.push({inlineData:{mimeType:attachedFile.mimeType,data:attachedFile.data}});contents[contents.length-1].parts=parts;_aiAttachmentAnalysisMode=true;aiClearPendingFile();}
 
   try {
     for (let i = 0; i < AI_MAX_TOOL_LOOPS; i++) {
       const { parts, grounding } = await aiCallGemini(contents);
 
+      // Web検索が使われたターンは参照元を出す（透明性のため。ツール実行ログと同じ扱い）
+      if (grounding && (grounding.webSearchQueries?.length || grounding.groundingChunks?.length)) {
+        const queries = grounding.webSearchQueries || [];
+        const sources = [...new Set((grounding.groundingChunks || [])
+          .map(c => c.web?.title || c.web?.uri).filter(Boolean))];
+        const qText = queries.length ? `「${queries.join('」「')}」` : '';
+        const srcText = sources.length ? `\n参照元: ${sources.slice(0, 4).join(' / ')}` : '';
+        aiPushMessage('system', `🔎 Web検索${qText ? '：' + qText : ''}${srcText}`);
+        renderAiChat();
+      }
 
       // thought_signature対策: functionCallの{name,args}だけでなく、partをまるごと
       // 保持して送り返す（thoughtSignatureはfunctionCallの隣にpart単位で付く。
@@ -4625,8 +4662,7 @@ async function sendAiChatMessage(userText) {
   } catch (e) {
     aiPushMessage('error', `エラー: ${e?.message || e}`);
     renderAiChat();
-  } finally {_aiImageAnalysisMode=false;
-    _aiUrlContextForRequest=false;
+  } finally {_aiAttachmentAnalysisMode=false;_aiUrlContextForRequest=false;
     _aiChatBusy = false;
     _aiSetChatBusyUi(false);
   }
@@ -9447,8 +9483,8 @@ function bindEvents() {
   /* ── Hauryuver: AIチャット（サイドバー） ──
      (Decisions: 2026-08-18-weeky-ai-sidebar-gemini-integration) */
   q('aiChatAttachBtn')?.addEventListener('click',()=>q('aiChatImageInput')?.click());
-  q('aiAttachmentRemove')?.addEventListener('click',aiClearPendingImage);
-  q('aiChatImageInput')?.addEventListener('change',async e=>{const f=e.target.files?.[0];if(!f)return;try{_aiPendingImage=await aiPrepareImage(f);document.getElementById('aiAttachmentThumb').src=`data:${_aiPendingImage.mimeType};base64,${_aiPendingImage.data}`;document.getElementById('aiAttachmentName').textContent=_aiPendingImage.name;document.getElementById('aiAttachmentPreview').hidden=false;q('aiChatInput')?.focus()}catch(err){aiClearPendingImage();showToast(err?.message||'画像を読めません')}});
+  q('aiAttachmentRemove')?.addEventListener('click',aiClearPendingFile);
+  q('aiChatImageInput')?.addEventListener('change',async e=>{const f=e.target.files?.[0];if(!f)return;try{_aiPendingFile=await aiPrepareAttachment(f);aiShowPendingFile(_aiPendingFile);q('aiChatInput')?.focus()}catch(err){aiClearPendingFile();showToast(err?.message||'ファイルを読み込めません')}});
   q('aiChatForm')?.addEventListener('submit', e => {
     e.preventDefault();
     const input = q('aiChatInput');
