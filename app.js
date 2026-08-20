@@ -520,7 +520,7 @@
 /* ── Constants ──────────────────────────────────────────── */
 /* Single source of truth for the version. Keep in sync with the ?v= query in
    index.html and CACHE_NAME in service-worker.js. Shown in 設定 → このアプリ. */
-const APP_VERSION = 'H8';
+const APP_VERSION = 'H9';
 const DAYS = ['月', '火', '水', '木', '金']; /* Mon–Fri only */
 const DEFAULT_PERIODS = 6;
 const ACTIVATION_CODES = ['SHUAN-2026'];
@@ -638,7 +638,7 @@ const state = {
     lockTimeoutMin: 5,       // 無操作タイムアウト（分）1|3|5|10|30
     ai: {                    // Hauryuver: サイドバーAIチャット用（Gemini API）
       apiKey: '',
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3.7-flash',
       systemPrompt: '',
     },
   },
@@ -730,7 +730,7 @@ async function load() {
     if (data.aiMemory) state.aiMemory = { facts: data.aiMemory.facts || [], mistakes: data.aiMemory.mistakes || [] };
     if (data.settings) Object.assign(state.settings, data.settings);
     // 旧データはsettings.aiを持たないため、Object.assignで消えていないか保険で確認
-    if (!state.settings.ai) state.settings.ai = { apiKey: '', model: 'gemini-2.5-flash', systemPrompt: '' };
+    if (!state.settings.ai) state.settings.ai = { apiKey: '', model: 'gemini-3.7-flash', systemPrompt: '' };
     if (state.settings.viewTransition === 'warp') state.settings.viewTransition = 'pop';  // 廃止した演出のフォールバック
 
     // 旧「ミッドナイト」テーマ＝暗い背景。外観モード導入に伴い、
@@ -4003,8 +4003,33 @@ function aiToolDeclarations() {
       },
       {
         name: 'list_classes',
-        description: '登録されているクラス名の一覧を取得する。set_lessonのclassNameに使う。',
+        description: '登録されているクラス（学級）の一覧を学校ごとに取得する。set_lessonのclassNameにはlessonClassNameを使う。',
         parameters: { type: 'object', properties: {} },
+      },
+      {
+        name: 'add_class',
+        description: '新しい学級を登録する。例:「3年2組」「3-2」のような表記を渡す。複数校運用時はschoolId省略で現在アクティブな学校に追加される。',
+        parameters: {
+          type: 'object',
+          properties: {
+            text:     { type: 'string', description: '学級名（例: 3年2組 / 3-2 / 3の2）' },
+            schoolId: { type: 'string', description: '追加先の学校id（list_classes参照、任意・省略時はアクティブ校）' },
+            year:     { type: 'string', description: '年度（任意、省略時は今年）' },
+          },
+          required: ['text'],
+        },
+      },
+      {
+        name: 'add_subject',
+        description: '新しい教科を登録する。',
+        parameters: {
+          type: 'object',
+          properties: {
+            name:  { type: 'string', description: '教科名（例: プログラミング）' },
+            color: { type: 'string', description: '表示色（任意、#RRGGBB形式の16進カラーコード）' },
+          },
+          required: ['name'],
+        },
       },
       {
         name: 'get_lesson',
@@ -4123,6 +4148,8 @@ const AI_TOOL_LABELS = {
   forget_mistake: '失敗パターンを削除',
   list_subjects: '教科一覧を確認',
   list_classes: 'クラス一覧を確認',
+  add_class: '学級を追加',
+  add_subject: '教科を追加',
   get_lesson: '授業記録を確認',
   list_week_lessons: '週の授業記録を確認',
   set_lesson: '授業記録を保存',
@@ -4236,6 +4263,36 @@ function aiExecuteTool(name,args){if(_aiImageAnalysisMode&&['add_todo','set_less
       }
       case 'list_classes': {
         return aiClassCatalogue();
+      }
+      case 'add_class': {
+        if (!args.text || !String(args.text).trim()) return { error: 'text is required' };
+        ensureDefaultSchool();
+        const targetSchoolId = (args.schoolId && state.schools.some(s => s.id === args.schoolId))
+          ? args.schoolId : state.activeSchoolId;
+        const prevActive = state.activeSchoolId;
+        state.activeSchoolId = targetSchoolId; // addClassEntity/activeSchoolClasses()はactiveSchoolId基準のため一時切替
+        const parsed = parseClassText(args.text);
+        if (!parsed) { state.activeSchoolId = prevActive; return { error: '学級名を読み取れませんでした（例: 3年2組）' }; }
+        const name = makeClassName(parsed.grade, parsed.classNo);
+        const alreadyExisted = activeSchoolClasses().some(c => c.name === name);
+        addClassEntity(args.text, args.year); // 内部でsave()・重複時はtoastのみ
+        state.activeSchoolId = prevActive; // 表示中の学校を勝手に変えない
+        save();
+        populateClassSelect?.();
+        const cat = aiClassCatalogue();
+        const school = cat.schools.find(s => s.schoolId === targetSchoolId);
+        const created = school?.classes.find(c => c.className === name);
+        return { ok: true, school: school?.schoolName || '', lessonClassName: created?.lessonClassName || name, alreadyExisted };
+      }
+      case 'add_subject': {
+        if (!args.name || !String(args.name).trim()) return { error: 'name is required' };
+        const existing = state.settings.subjects.find(s => s.name === args.name.trim());
+        if (existing) return { ok: true, subject: { id: existing.id, name: existing.name }, alreadyExisted: true };
+        const okAdded = addSubject(args.name, args.color); // 内部でsave()
+        if (!okAdded) return { error: 'failed to add subject' };
+        const created = state.settings.subjects[state.settings.subjects.length - 1];
+        populateSubjectSelect?.();
+        return { ok: true, subject: { id: created.id, name: created.name, color: created.color } };
       }
       case 'get_lesson': {
         if (!args.date || !args.period) return { error: 'date and period are required' };
@@ -4426,6 +4483,9 @@ function aiSystemInstructionText() {
     'ToDo・週案（授業記録）・メモの操作が必要な時は、必ず用意されているツールを使って実行し、' +
     '内容を推測だけで済ませないでください。週案を編集する前はlist_subjects/list_classesで有効な値を、' +
     'idが必要な操作の前はlist_todos/list_notes/list_memoryで対象のidを確認すること。\n\n' +
+    'Google検索も使えます。ToDo・週案・メモ・記憶などWEEKY内部のデータに関する質問は検索せずツールで完結させること。' +
+    '一方、最新のニュース、現在の制度・法令、外部サイトの内容、あなたの知識だけでは答えられない・古い可能性がある話題では、' +
+    'ユーザーに「検索して」と言われなくても自分の判断でGoogle検索を使ってから答えること。\n\n' +
     `今日の日付は ${formatDate(new Date())} です。\n\n` +
     '【長期記憶（ユーザーについて覚えていること）】\n' + factsText + '\n\n' +
     '【過去の失敗パターン（繰り返さないこと）】\n' + mistakesText + '\n\n' +
@@ -4444,14 +4504,20 @@ function aiBuildContentsFromHistory() {
 
 async function aiCallGemini(contents) {
   const apiKey = state.settings.ai?.apiKey?.trim();
-  const model  = state.settings.ai?.model?.trim() || 'gemini-2.5-flash';
+  const model  = state.settings.ai?.model?.trim() || 'gemini-3.7-flash';
   if (!apiKey) throw new Error('APIキー未設定');
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  // Gemini 3系は「組み込みツール（Google検索）」と「カスタムツール（WEEKYのfunction calling）」を
+  // 同一リクエストで併用できる（Preview機能。2026年3月〜）。トグルボタンや発言内容でのキーワード
+  // 判定は不要で、モデル自身が「これは検索が要る」「これはWEEKY内部データの話だ」を都度判断する。
+  // Gemini 3系以外のモデルではこの組み合わせが未サポートのため、従来通りfunction callingのみ渡す。
+  const isGemini3 = /^gemini-3/i.test(model);
   const body = {
     contents,
-    tools: aiToolDeclarations(),
+    tools: isGemini3 ? [{ googleSearch: {} }, ...aiToolDeclarations()] : aiToolDeclarations(),
     systemInstruction: { parts: [{ text: aiSystemInstructionText() }] },
   };
+  if (isGemini3) body.toolConfig = { includeServerSideToolInvocations: true };
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -4467,7 +4533,7 @@ async function aiCallGemini(contents) {
     const blockReason = data?.promptFeedback?.blockReason;
     throw new Error(blockReason ? `応答がブロックされました（${blockReason}）` : '応答が空でした');
   }
-  return candidate.content?.parts || [];
+  return { parts: candidate.content?.parts || [], grounding: candidate.groundingMetadata || null };
 }
 
 let _aiChatBusy = false;
@@ -4499,7 +4565,19 @@ async function sendAiChatMessage(userText) {
 
   try {
     for (let i = 0; i < AI_MAX_TOOL_LOOPS; i++) {
-      const parts = await aiCallGemini(contents);
+      const { parts, grounding } = await aiCallGemini(contents);
+
+      // Web検索が使われたターンは参照元を出す（透明性のため。ツール実行ログと同じ扱い）
+      if (grounding && (grounding.webSearchQueries?.length || grounding.groundingChunks?.length)) {
+        const queries = grounding.webSearchQueries || [];
+        const sources = [...new Set((grounding.groundingChunks || [])
+          .map(c => c.web?.title || c.web?.uri).filter(Boolean))];
+        const qText = queries.length ? `「${queries.join('」「')}」` : '';
+        const srcText = sources.length ? `\n参照元: ${sources.slice(0, 4).join(' / ')}` : '';
+        aiPushMessage('system', `🔎 Web検索${qText ? '：' + qText : ''}${srcText}`);
+        renderAiChat();
+      }
+
       // thought_signature対策: functionCallの{name,args}だけでなく、partをまるごと
       // 保持して送り返す（thoughtSignatureはfunctionCallの隣にpart単位で付く。
       // 抜き出して作り直すと消えてGemini 3系でエラーになる）。
@@ -4513,7 +4591,8 @@ async function sendAiChatMessage(userText) {
           const label = AI_TOOL_LABELS[fc.name] || fc.name;
           aiPushMessage('system', `🔧 ${label}`);
           const result = aiExecuteTool(fc.name, fc.args);
-          return { name: fc.name, response: result };
+          // Gemini 3系は並列呼び出しの対応付けにidを使うため、あれば一緒に返す
+          return fc.id ? { name: fc.name, response: result, id: fc.id } : { name: fc.name, response: result };
         });
         renderAiChat();
         contents = [...contents, { role: 'user', parts: responses.map(r => ({ functionResponse: r })) }];
@@ -6866,7 +6945,7 @@ function renderSettings() {
   if (s('periodsCount'))   s('periodsCount').value    = state.settings.periodsCount;
   if (s('lessonDuration')) s('lessonDuration').value  = state.settings.lessonDuration || 50;
   if (s('aiApiKey'))       s('aiApiKey').value         = state.settings.ai?.apiKey || '';
-  if (s('aiModel'))        s('aiModel').value          = state.settings.ai?.model || 'gemini-2.5-flash';
+  if (s('aiModel'))        s('aiModel').value          = state.settings.ai?.model || 'gemini-3.7-flash';
   if (s('aiSystemPrompt')) s('aiSystemPrompt').value   = state.settings.ai?.systemPrompt || '';
   renderAiMemorySettings();
 
@@ -6988,7 +7067,7 @@ function saveSettings() {
   state.settings.lessonDuration = parseInt(s('lessonDuration')?.value || 50, 10);
   if (!state.settings.ai) state.settings.ai = {};
   state.settings.ai.apiKey       = s('aiApiKey')?.value.trim()       || '';
-  state.settings.ai.model        = s('aiModel')?.value.trim()        || 'gemini-2.5-flash';
+  state.settings.ai.model        = s('aiModel')?.value.trim()        || 'gemini-3.7-flash';
   state.settings.ai.systemPrompt = s('aiSystemPrompt')?.value        || '';
   save();
   renderWeekGrid();

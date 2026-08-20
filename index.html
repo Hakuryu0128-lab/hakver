@@ -15,7 +15,7 @@
   <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png" />
   <link rel="icon" type="image/png" sizes="512x512" href="icons/icon-512.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="stylesheet" href="styles.css?v=H8" />
+  <link rel="stylesheet" href="styles.css?v=H9" />
   <!-- Hauryuver: AIチャットパネル用スタイル。styles.css未編集で完結させるため
        ここに直書き（本体スタイルに合流させたくなったら styles.css へ移動可）。
        (Decisions: 2026-08-18-weeky-ai-sidebar-gemini-integration) -->
@@ -909,14 +909,14 @@
                    (Decisions: 2026-08-18-weeky-ai-sidebar-gemini-integration) -->
               <section class="settings-section hidden" data-cat="ai">
                 <h3>AI（Gemini）</h3>
-                <p class="settings-hint">サイドバーのAIチャットで使うGemini APIの設定です。APIキーはこの端末のみに保存され、外部には送信されません（Gemini API自体への通信を除く）。<a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a>でキーを発行できます。</p>
+                <p class="settings-hint">サイドバーのAIチャットで使うGemini APIの設定です。APIキーはこの端末のみに保存され、外部には送信されません（Gemini API自体への通信を除く）。<a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a>でキーを発行できます。Web検索を自動で使わせたい場合はgemini-3系のモデルを指定してください（例: gemini-3.7-flash）。</p>
                 <div class="settings-row">
                   <label for="aiApiKey">APIキー</label>
                   <input type="text" id="aiApiKey" class="settings-input ai-api-key-input" placeholder="AIza…" autocomplete="off" autocapitalize="none" inputmode="text" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-form-type="other" />
                 </div>
                 <div class="settings-row">
                   <label for="aiModel">モデル</label>
-                  <input type="text" id="aiModel" class="settings-input" placeholder="gemini-2.5-flash" autocomplete="off" spellcheck="false" />
+                  <input type="text" id="aiModel" class="settings-input" placeholder="gemini-3.7-flash" autocomplete="off" spellcheck="false" />
                 </div>
                 <div class="settings-row" style="align-items:flex-start;">
                   <label for="aiSystemPrompt">システムプロンプト</label>
@@ -1462,6 +1462,6 @@
 <script src="vendor/fontkit.umd.min.js"></script>
 <script async src="https://tally.so/widgets/embed.js"></script>
 <script async src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
-<script src="app.js?v=H8"></script>
+<script src="app.js?v=H9"></script>
 </body>
 </html>
