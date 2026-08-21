@@ -4556,57 +4556,71 @@ async function aiPrepareAttachment(file){const name=file.name||'添付',ext=(nam
 function aiShowPendingFile(f){const p=document.getElementById('aiAttachmentPreview'),t=document.getElementById('aiAttachmentThumb'),g=document.getElementById('aiAttachmentGeneric'),n=document.getElementById('aiAttachmentName'),info=document.getElementById('aiAttachmentInfo');if(f.preview){t.src=f.preview;t.hidden=false;g.hidden=true}else{t.hidden=true;g.hidden=false;g.textContent=f.category==='pdf'?'📕':f.category==='audio'?'🎙️':f.category==='csv'?'📊':f.category==='json'?'🧩':'📄'}n.textContent=f.name;const mb=f.size>=1048576?(f.size/1048576).toFixed(1)+'MB':Math.max(1,Math.round(f.size/1024))+'KB';info.textContent=(f.category==='audio'?'文字起こし・要約':f.category==='pdf'?'PDFを解析':'内容を解析')+' ・ '+mb;p.hidden=false}
 function aiSpeechText(text){return String(text||'').replace(/```[\s\S]*?```/g,'コードは画面に表示しました。').replace(/https?:\/\/\S+/g,'').replace(/[#*_`>\[\]()]/g,'').replace(/^[\s]*[-+]\s+/gm,'').replace(/\n{2,}/g,'。').replace(/\n/g,'、').trim().slice(0,1200)}
 function aiSpeak(text){if(!('speechSynthesis'in window))return;const plain=aiSpeechText(text);if(!plain)return;window.speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(plain);u.lang='ja-JP';u.rate=1.02;u.pitch=1;const vs=window.speechSynthesis.getVoices();u.voice=vs.find(v=>v.lang?.toLowerCase().startsWith('ja'))||null;u.onend=()=>{if(_aiWakeEnabled)setTimeout(aiStartWakeRecognition,700)};u.onerror=()=>{if(_aiWakeEnabled)setTimeout(aiStartWakeRecognition,700)};window.speechSynthesis.speak(u)}
-let _aiWakeEnabled=false,_aiWakeRecognition=null,_aiWakeRestartTimer=null,_aiWakeSuppressClick=false,_aiWakeSession=0;
-const AI_WAKE_WORDS=['ねえweeky','ねぇweeky','heyweeky','okweeky','ウィーキー','ウィーキ','ウイーキー','ウイーキ','ウィッキー','ウイッキー','ウィークリー','ウイークリー','ウィークリ','wiki','weeky'];
-function aiNormalizeWakeText(s){return String(s||'').toLowerCase().replace(/[\s、。,.!！?？ー～~・]/g,'').replace(/[ａ-ｚＡ-Ｚ０-９]/g,c=>String.fromCharCode(c.charCodeAt(0)-(c<='９'?0xFEE0:(c>='ａ'?0xFEE0:0xFEE0))))}
+let _aiWakeEnabled=false,_aiWakeRecognition=null,_aiWakeRestartTimer=null,_aiWakeSuppressClick=false,_aiWakeLastHit=0;
+const AI_WAKE_WORDS=['ねえweeky','ねぇweeky','ねえwiki','ねぇwiki','heyweeky','weeky','wiki','ウィーキー','ウィーキ','ウィキ','ウイーキー','ウイキ','ウィッキー','ウェイキー','ウェイキ','ウエイキー','ウエイキ'];
+function aiNormalizeWakeText(s){return String(s||'').toLowerCase().replace(/[\s、。,.!！?？ーｰ～~・「」『』]/g,'').replace(/ｗｅｅｋｙ/g,'weeky').replace(/ｗｉｋｉ/g,'wiki')}
+function aiWakeMatched(raw){
+  const t=aiNormalizeWakeText(raw);if(!t)return false;
+  if(AI_WAKE_WORDS.some(w=>t.includes(aiNormalizeWakeText(w))))return true;
+  // 音声認識で頻発する表記揺れ。「ねえ/ねぇ」付きの場合はやや広く許容する。
+  if(/ね[えぇ]?(?:う?[ぃい]?き|う?[ぇえ]い?き|びき|wiki|weeky)/.test(t))return true;
+  return false;
+}
 function aiWakeSupported(){return !!(window.SpeechRecognition||window.webkitSpeechRecognition)}
-function aiWakeDebug(text,error=false){const el=document.getElementById('aiWakeDebug');if(!el)return;el.hidden=!text;el.textContent=text||'';el.classList.toggle('is-error',error)}
-function aiEditDistance(a,b){const d=Array.from({length:a.length+1},(_,i)=>[i]);for(let j=1;j<=b.length;j++)d[0][j]=j;for(let i=1;i<=a.length;i++)for(let j=1;j<=b.length;j++)d[i][j]=Math.min(d[i-1][j]+1,d[i][j-1]+1,d[i-1][j-1]+(a[i-1]===b[j-1]?0:1));return d[a.length][b.length]}
-function aiIsWakePhrase(raw){const t=aiNormalizeWakeText(raw);if(!t)return false;const keys=AI_WAKE_WORDS.map(aiNormalizeWakeText);if(keys.some(k=>t.includes(k)))return true;const stripped=t.replace(/^(ねえ|ねぇ|ヘイ|へい|hey|ok|オーケー)/,'');return keys.some(k=>k.length>=3&&aiEditDistance(stripped,k)<=2)}
 function aiSetWakeUi(on){const mic=document.getElementById('aiChatMicBtn'),status=document.getElementById('aiWakeStatus');mic?.classList.toggle('is-wake-listening',on);if(status)status.hidden=!on;if(mic)mic.title=on?'ウェイクワード待機中。長押しで解除':'タップで録音・長押しでウェイクワード待機'}
-function aiStopWakeRecognition(){clearTimeout(_aiWakeRestartTimer);_aiWakeRestartTimer=null;_aiWakeSession++;if(_aiWakeRecognition){_aiWakeRecognition.onend=null;try{_aiWakeRecognition.abort()}catch{} _aiWakeRecognition=null}}
-function aiDisableWakeMode(message='ウェイクワード待機を終了しました'){_aiWakeEnabled=false;aiStopWakeRecognition();aiSetWakeUi(false);aiWakeDebug('');aiVoiceStatus(message)}
-function aiScheduleWakeRestart(delay=350){clearTimeout(_aiWakeRestartTimer);if(_aiWakeEnabled&&!_aiChatBusy&&!_aiRecording)_aiWakeRestartTimer=setTimeout(aiStartWakeRecognition,delay)}
+function aiVoiceCue(kind='wake'){
+  try{
+    const C=window.AudioContext||window.webkitAudioContext;if(!C)return;
+    const c=new C(),g=c.createGain(),o=c.createOscillator();o.type='sine';o.frequency.setValueAtTime(kind==='wake'?880:520,c.currentTime);o.frequency.exponentialRampToValueAtTime(kind==='wake'?1320:660,c.currentTime+.11);g.gain.setValueAtTime(.0001,c.currentTime);g.gain.exponentialRampToValueAtTime(.18,c.currentTime+.015);g.gain.exponentialRampToValueAtTime(.0001,c.currentTime+.18);o.connect(g);g.connect(c.destination);o.start();o.stop(c.currentTime+.2);o.onended=()=>c.close().catch(()=>{});
+  }catch{}
+}
+function aiStopWakeRecognition(){clearTimeout(_aiWakeRestartTimer);_aiWakeRestartTimer=null;if(_aiWakeRecognition){_aiWakeRecognition.onend=null;try{_aiWakeRecognition.abort()}catch{} _aiWakeRecognition=null}}
+function aiDisableWakeMode(message='ウェイクワード待機を終了しました'){_aiWakeEnabled=false;aiStopWakeRecognition();aiSetWakeUi(false);aiVoiceStatus(message)}
 function aiStartWakeRecognition(){
   if(!_aiWakeEnabled||_aiChatBusy||_aiRecording||window.speechSynthesis?.speaking)return;
   if(!aiWakeSupported()){aiDisableWakeMode('この端末ではウェイクワード待機に対応していません');return}
-  aiStopWakeRecognition();const session=_aiWakeSession;
-  const R=window.SpeechRecognition||window.webkitSpeechRecognition,r=new R();_aiWakeRecognition=r;r.lang='ja-JP';r.continuous=false;r.interimResults=true;r.maxAlternatives=3;
-  aiWakeDebug('音声認識を開始しています…');
-  r.onstart=()=>{if(session!==_aiWakeSession-1&&_aiWakeRecognition!==r)return;aiWakeDebug('マイク待機中。聞き取った言葉をここに表示します')};
-  r.onaudiostart=()=>aiWakeDebug('音声待機中…');
-  r.onspeechstart=()=>aiWakeDebug('声を検出しました。認識中…');
-  r.onresult=e=>{let shown='';for(let i=e.resultIndex;i<e.results.length;i++){const alternatives=[];for(let j=0;j<Math.min(3,e.results[i].length);j++)alternatives.push(e.results[i][j]?.transcript||'');shown=alternatives.filter(Boolean).join(' / ');if(alternatives.some(aiIsWakePhrase)){r.onend=null;try{r.stop()}catch{} _aiWakeRecognition=null;aiWakeDebug(`起動語を検出: ${shown}`);aiVoiceStatus('はい、どうぞ。話してください');setTimeout(()=>aiStartVoiceRecording(true),260);return}}if(shown)aiWakeDebug(`聞き取り: ${shown}`)};
-  r.onnomatch=()=>aiWakeDebug('言葉を判定できませんでした。続けて話しかけてください');
-  r.onerror=e=>{const msg={"no-speech":'声が聞こえませんでした',"audio-capture":'マイクを使用できません',"not-allowed":'音声認識が許可されていません',"service-not-allowed":'音声認識サービスが許可されていません',"network":'音声認識サービスへ接続できません',"aborted":'認識を再開します'}[e.error]||`認識エラー: ${e.error}`;aiWakeDebug(msg,!['no-speech','aborted'].includes(e.error));if(['not-allowed','service-not-allowed','audio-capture'].includes(e.error)){aiDisableWakeMode(msg);return}};
-  r.onend=()=>{if(_aiWakeRecognition===r)_aiWakeRecognition=null;if(_aiWakeEnabled){aiWakeDebug('待機を更新しています…');aiScheduleWakeRestart(300)}};
-  try{r.start();aiSetWakeUi(true);aiVoiceStatus('「ねえWEEKY」と話しかけてください')}catch(e){aiWakeDebug(`開始失敗: ${e?.message||e}`,true);aiScheduleWakeRestart(700)}
+  aiStopWakeRecognition();
+  const R=window.SpeechRecognition||window.webkitSpeechRecognition,r=new R();_aiWakeRecognition=r;r.lang='ja-JP';r.continuous=true;r.interimResults=true;r.maxAlternatives=5;
+  r.onresult=e=>{for(let i=e.resultIndex;i<e.results.length;i++){const result=e.results[i];for(let a=0;a<Math.min(result.length,5);a++){const raw=result[a]?.transcript||'';if(aiWakeMatched(raw)&&Date.now()-_aiWakeLastHit>2500){_aiWakeLastHit=Date.now();r.onend=null;try{r.stop()}catch{} _aiWakeRecognition=null;aiVoiceCue('wake');aiVoiceStatus('はい、どうぞ。音のあとに話してください');setTimeout(()=>aiStartVoiceRecording(true),850);return}}}};
+  r.onerror=e=>{if(['not-allowed','service-not-allowed'].includes(e.error)){aiDisableWakeMode('マイクまたは音声認識の許可が必要です');return}if(e.error==='no-speech')return};
+  r.onend=()=>{_aiWakeRecognition=null;if(_aiWakeEnabled)_aiWakeRestartTimer=setTimeout(aiStartWakeRecognition,450)};
+  try{r.start();aiSetWakeUi(true);aiVoiceStatus('「ねえWEEKY」と話しかけてください')}catch{_aiWakeRestartTimer=setTimeout(aiStartWakeRecognition,700)}
 }
 async function aiToggleWakeMode(){
   if(_aiWakeEnabled){aiDisableWakeMode();return}
-  if(!aiWakeSupported()){aiVoiceStatus('このブラウザではウェイクワード待機に対応していません。ChromeまたはEdgeを試してください。',true);return}
-  try{const s=await navigator.mediaDevices.getUserMedia({audio:true});s.getTracks().forEach(t=>t.stop());_aiWakeEnabled=true;aiSetWakeUi(true);aiWakeDebug('マイクの準備ができました');aiStartWakeRecognition()}catch(e){aiVoiceStatus('マイクの使用を許可してください',true);aiWakeDebug(e?.message||'マイク許可エラー',true)}
+  if(!aiWakeSupported()){aiVoiceStatus('この端末ではウェイクワード待機に対応していません。通常のマイク入力は使えます。',true);return}
+  try{const s=await navigator.mediaDevices.getUserMedia({audio:true});s.getTracks().forEach(t=>t.stop());_aiWakeEnabled=true;aiSetWakeUi(true);aiVoiceCue('ready');aiStartWakeRecognition()}catch{aiVoiceStatus('マイクの使用を許可してください',true)}
 }
 let _aiRecorder=null,_aiMicStream=null,_aiAudioChunks=[],_aiRecording=false;
 function aiVoiceStatus(text,error=false){const el=document.getElementById('aiVoiceStatus');if(!el)return;el.hidden=!text;el.textContent=text||'';el.classList.toggle('is-error',error)}
+function aiBrokenTranscript(text){
+  const s=String(text||'').replace(/\s/g,'').trim();if(!s||s==='__NO_SPEECH__')return true;
+  if(s.length>60&&/^\d+$/.test(s))return true;
+  for(let n=1;n<=10;n++){if(s.length>=n*7){const unit=s.slice(0,n),made=unit.repeat(Math.ceil(s.length/n)).slice(0,s.length);if(made===s)return true}}
+  return false;
+}
 async function aiToggleVoiceInput(){if(_aiChatBusy)return;if(_aiRecording){_aiRecorder?.stop();return}aiStopWakeRecognition();await aiStartVoiceRecording(false)}
 async function aiStartVoiceRecording(autoStop=false){
   if(_aiRecording||_aiChatBusy)return;
   try{
     window.speechSynthesis?.cancel();
-    _aiMicStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
+    _aiMicStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true,channelCount:1}});
     let mime='';for(const x of ['audio/webm;codecs=opus','audio/webm','audio/mp4'])if(window.MediaRecorder?.isTypeSupported?.(x)){mime=x;break}
     _aiAudioChunks=[];_aiRecorder=new MediaRecorder(_aiMicStream,mime?{mimeType:mime}:undefined);
-    let audioCtx=null,analyser=null,silenceTimer=null,maxTimer=null,raf=0,heardVoice=false,lastVoice=performance.now();
-    const cleanupMonitor=()=>{cancelAnimationFrame(raf);clearTimeout(maxTimer);clearTimeout(silenceTimer);try{audioCtx?.close()}catch{}};
-    if(autoStop&&window.AudioContext){audioCtx=new AudioContext();const src=audioCtx.createMediaStreamSource(_aiMicStream);analyser=audioCtx.createAnalyser();analyser.fftSize=512;src.connect(analyser);const bins=new Uint8Array(analyser.fftSize);const watch=()=>{if(!_aiRecording)return;analyser.getByteTimeDomainData(bins);let sum=0;for(const v of bins){const d=(v-128)/128;sum+=d*d}const rms=Math.sqrt(sum/bins.length);if(rms>.025){heardVoice=true;lastVoice=performance.now()}if(heardVoice&&performance.now()-lastVoice>1300){_aiRecorder?.stop();return}raf=requestAnimationFrame(watch)};watch();maxTimer=setTimeout(()=>{if(_aiRecording)_aiRecorder?.stop()},20000)}
+    let audioCtx=null,analyser=null,maxTimer=null,startTimer=null,raf=0,heardVoice=false,lastVoice=performance.now(),peakRms=0;
+    const cleanupMonitor=()=>{cancelAnimationFrame(raf);clearTimeout(maxTimer);clearTimeout(startTimer);try{audioCtx?.close()}catch{}};
+    if(autoStop&&(window.AudioContext||window.webkitAudioContext)){
+      const C=window.AudioContext||window.webkitAudioContext;audioCtx=new C();const src=audioCtx.createMediaStreamSource(_aiMicStream);analyser=audioCtx.createAnalyser();analyser.fftSize=1024;analyser.smoothingTimeConstant=.35;src.connect(analyser);const bins=new Uint8Array(analyser.fftSize);
+      const watch=()=>{if(!_aiRecording)return;analyser.getByteTimeDomainData(bins);let sum=0;for(const v of bins){const d=(v-128)/128;sum+=d*d}const rms=Math.sqrt(sum/bins.length);peakRms=Math.max(peakRms,rms);if(rms>.014){heardVoice=true;lastVoice=performance.now()}if(heardVoice&&performance.now()-lastVoice>1550){_aiRecorder?.stop();return}raf=requestAnimationFrame(watch)};watch();
+      startTimer=setTimeout(()=>{if(_aiRecording&&!heardVoice)_aiRecorder?.stop()},5500);maxTimer=setTimeout(()=>{if(_aiRecording)_aiRecorder?.stop()},25000);
+    }
     _aiRecorder.ondataavailable=e=>{if(e.data?.size)_aiAudioChunks.push(e.data)};
     _aiRecorder.onerror=()=>aiVoiceStatus('録音中にエラーが発生しました',true);
-    _aiRecorder.onstop=async()=>{cleanupMonitor();_aiRecording=false;document.getElementById('aiChatMicBtn')?.classList.remove('is-recording');_aiMicStream?.getTracks().forEach(t=>t.stop());const blob=new Blob(_aiAudioChunks,{type:_aiRecorder.mimeType||'audio/webm'});if(blob.size<1000){aiVoiceStatus('音声を認識できませんでした',true);if(_aiWakeEnabled)setTimeout(aiStartWakeRecognition,700);return}if(blob.size>AI_INLINE_MAX_BYTES){aiVoiceStatus('録音が長すぎます。短く区切ってください',true);if(_aiWakeEnabled)setTimeout(aiStartWakeRecognition,700);return}aiVoiceStatus('音声を文字起こししています…');try{const transcript=await aiTranscribeVoice(blob);if(!transcript)throw new Error('文字起こしできませんでした');const input=document.getElementById('aiChatInput');if(input){input.value=transcript;input.style.height='auto'}aiVoiceStatus(`認識: ${transcript}`);_aiVoiceReplyPending=true;setTimeout(()=>{const box=document.getElementById('aiChatInput');if(box){box.value='';box.style.height='auto'}sendAiChatMessage(transcript)},120)}catch(err){aiVoiceStatus(err?.message||'音声認識に失敗しました',true);if(_aiWakeEnabled)setTimeout(aiStartWakeRecognition,700)}};
+    _aiRecorder.onstop=async()=>{cleanupMonitor();_aiRecording=false;document.getElementById('aiChatMicBtn')?.classList.remove('is-recording');_aiMicStream?.getTracks().forEach(t=>t.stop());if(autoStop&&!heardVoice){aiVoiceStatus('声を認識できませんでした。もう一度「ねえWEEKY」と呼んでください',true);if(_aiWakeEnabled)setTimeout(aiStartWakeRecognition,700);return}const blob=new Blob(_aiAudioChunks,{type:_aiRecorder.mimeType||'audio/webm'});if(blob.size<1400){aiVoiceStatus('音声を認識できませんでした',true);if(_aiWakeEnabled)setTimeout(aiStartWakeRecognition,700);return}if(blob.size>AI_INLINE_MAX_BYTES){aiVoiceStatus('録音が長すぎます。短く区切ってください',true);if(_aiWakeEnabled)setTimeout(aiStartWakeRecognition,700);return}aiVoiceStatus('音声を文字起こししています…');try{const transcript=await aiTranscribeVoice(blob);if(aiBrokenTranscript(transcript))throw new Error('音声を正しく認識できませんでした。もう一度話してください');const input=document.getElementById('aiChatInput');if(input){input.value=transcript;input.style.height='auto'}aiVoiceStatus(`認識: ${transcript}`);_aiVoiceReplyPending=true;setTimeout(()=>{const box=document.getElementById('aiChatInput');if(box){box.value='';box.style.height='auto'}sendAiChatMessage(transcript)},120)}catch(err){aiVoiceStatus(err?.message||'音声認識に失敗しました',true);if(_aiWakeEnabled)setTimeout(aiStartWakeRecognition,900)}};
     _aiRecorder.start(250);_aiRecording=true;document.getElementById('aiChatMicBtn')?.classList.add('is-recording');aiVoiceStatus(autoStop?'話してください。話し終わると自動で送信します':'録音中です。話し終わったらマイクを押してください');
   }catch(err){aiVoiceStatus(err?.name==='NotAllowedError'?'マイクの使用を許可してください':'マイクを開始できませんでした',true);if(_aiWakeEnabled)setTimeout(aiStartWakeRecognition,700)}
 }
-async function aiTranscribeVoice(blob){const apiKey=state.settings.ai?.apiKey?.trim(),model=state.settings.ai?.model?.trim()||'gemini-3.5-flash-lite';if(!apiKey)throw new Error('APIキーが未設定です');const data=await aiFileToBase64(new File([blob],'voice.webm',{type:blob.type||'audio/webm'}));const url=`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;const body={contents:[{role:'user',parts:[{text:'この音声の発話内容だけを日本語で正確に文字起こししてください。説明、引用符、前置き、Markdownは不要です。'},{inlineData:{mimeType:blob.type||'audio/webm',data}}]}]};const res=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}),json=await res.json().catch(()=>null);if(!res.ok)throw new Error(json?.error?.message||`音声認識エラー HTTP ${res.status}`);return(json?.candidates?.[0]?.content?.parts||[]).map(p=>p.text||'').join('').trim()}
+async function aiTranscribeVoice(blob){const apiKey=state.settings.ai?.apiKey?.trim(),model=state.settings.ai?.model?.trim()||'gemini-3.5-flash-lite';if(!apiKey)throw new Error('APIキーが未設定です');const data=await aiFileToBase64(new File([blob],'voice.webm',{type:blob.type||'audio/webm'}));const url=`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;const body={contents:[{role:'user',parts:[{text:'この音声の発話内容だけを日本語で正確に文字起こししてください。説明、引用符、前置き、Markdownは不要です。無音、ノイズのみ、音声破損、または判別不能なら推測せず __NO_SPEECH__ だけを返してください。同じ数字や同じ語を補完して繰り返さないでください。'},{inlineData:{mimeType:blob.type||'audio/webm',data}}]}]};const res=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}),json=await res.json().catch(()=>null);if(!res.ok)throw new Error(json?.error?.message||`音声認識エラー HTTP ${res.status}`);return(json?.candidates?.[0]?.content?.parts||[]).map(p=>p.text||'').join('').trim()}
 
 async function sendAiChatMessage(userText) {
   userText=(userText||'').trim();const attachedFile=_aiPendingFile;if((!userText&&!attachedFile)||_aiChatBusy)return;if(!userText&&attachedFile)userText=attachedFile.category==='audio'?'この録音を文字起こしして要約し、決定事項・期限・担当・ToDo候補を整理して。':'このファイルを読み取り、要点と登録候補を整理して。';const urls=aiExtractUrls(userText);_aiUrlContextForRequest=urls.length>0;if(_aiUrlContextForRequest&&urls.length===1&&userText===urls[0])userText=`次のURLの内容を読み取り、要点と登録候補を整理して。\n${urls[0]}`;
