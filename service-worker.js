@@ -1,5 +1,5 @@
-const CACHE_NAME = 'weeky-H18';
-const CORE = ['./', './index.html', './styles.css?v=H18', './app.js?v=H18', './manifest.webmanifest'];
+const CACHE_NAME = 'weeky-H19';
+const CORE = ['./', './index.html', './styles.css?v=H19', './app.js?v=H19', './manifest.webmanifest'];
 self.addEventListener('install', event => { event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(CORE)).catch(() => null)); self.skipWaiting(); });
 self.addEventListener('activate', event => { event.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))).then(() => self.clients.claim())); });
 self.addEventListener('fetch', event => {
